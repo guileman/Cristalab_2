@@ -347,7 +347,7 @@ const modeName = id => MODES.find(m => m.id === id).nombre;
 
 const st = {
   lat: 'fcc', mode: 'edge', compact: false, showSites: false, siteType: 0, partials: false,
-  cyclic: false, sound: true, guides: true,
+  cyclic: false, sound: true, guides: true, bonds: false,
   sliderTau: 0, stickTau: 0, keyTau: 0, tau: 0, gbAngle: 8, time: 0,
 };
 let L = LAT[st.lat];
@@ -504,6 +504,46 @@ function setLines(obj, segs) { // segs: array plano [x,y,z,x,y,z,...]
   a.array.set(n === segs.length ? segs : segs.slice(0, n)); a.needsUpdate = true; obj.geometry.setDrawRange(0, n / 3);
 }
 const cellLines = lineObj(24, 0xffffff, false, .9); crystal.add(cellLines);
+// enlaces a primeros vecinos (recalculados con las posiciones actuales: se rompen y rehacen en el núcleo)
+const MAXB = 6000;
+const bondGeo = new THREE.BufferGeometry();
+bondGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXB * 6), 3).setUsage(THREE.DynamicDrawUsage));
+bondGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAXB * 6), 3).setUsage(THREE.DynamicDrawUsage));
+bondGeo.setDrawRange(0, 0);
+const bondLines = new THREE.LineSegments(bondGeo, new THREE.LineBasicMaterial({ vertexColors: true, fog: false, transparent: true, opacity: .9 }));
+bondLines.frustumCulled = false; crystal.add(bondLines);
+const GCELL = new Int32Array(MAX), GHEAD = new Int32Array(65536), GNEXT = new Int32Array(MAX);
+let bondTimer = 0;
+function updateBonds() {
+  if (!st.bonds) { bondGeo.setDrawRange(0, 0); return; }
+  const nn = L.nn, cut = 1.12 * nn, cut2 = cut * cut, cs = cut;
+  let x0 = 1e9, y0 = 1e9, z0 = 1e9;
+  for (let i = 0; i < N; i++) { x0 = Math.min(x0, CUR[i * 3]); y0 = Math.min(y0, CUR[i * 3 + 1]); z0 = Math.min(z0, CUR[i * 3 + 2]); }
+  const NX = 40, NY = 40, NZ = 40; GHEAD.fill(-1);
+  const cellOf = (x, y, z) => { const a = Math.min(NX - 1, Math.floor((x - x0) / cs)), b = Math.min(NY - 1, Math.floor((y - y0) / cs)), c = Math.min(NZ - 1, Math.floor((z - z0) / cs)); return (a * NY + b) * NZ + c; };
+  for (let i = 0; i < N; i++) { if (HID[i]) continue; const c = cellOf(CUR[i * 3], CUR[i * 3 + 1], CUR[i * 3 + 2]); GCELL[i] = c; GNEXT[i] = GHEAD[c]; GHEAD[c] = i; }
+  const P = bondGeo.attributes.position.array, C = bondGeo.attributes.color.array; let nb = 0;
+  for (let i = 0; i < N && nb < MAXB; i++) {
+    if (HID[i]) continue;
+    const x = CUR[i * 3], y = CUR[i * 3 + 1], z = CUR[i * 3 + 2], c = GCELL[i];
+    const a = Math.floor(c / (NY * NZ)), b = Math.floor(c / NZ) % NY, cz = c % NZ;
+    for (let da = -1; da <= 1; da++) for (let db = -1; db <= 1; db++) for (let dc = -1; dc <= 1; dc++) {
+      const A = a + da, B = b + db, Cz = cz + dc; if (A < 0 || B < 0 || Cz < 0 || A >= NX || B >= NY || Cz >= NZ) continue;
+      for (let j = GHEAD[(A * NY + B) * NZ + Cz]; j >= 0; j = GNEXT[j]) {
+        if (j <= i) continue;
+        const dx = CUR[j * 3] - x, dy = CUR[j * 3 + 1] - y, dz2 = CUR[j * 3 + 2] - z, r2 = dx * dx + dy * dy + dz2 * dz2;
+        if (r2 > cut2 || nb >= MAXB) continue;
+        // color según la longitud: comprimido → azul, normal → gris, estirado → rojo
+        const e = clamp((Math.sqrt(r2) / nn - 1) / .08, -1, 1);
+        const cr = e > 0 ? .75 + .25 * e : .75 + .5 * e, cg = .75 - .45 * Math.abs(e), cb = e < 0 ? .75 - .25 * e : .75 - .5 * e;
+        const o = nb * 6;
+        P[o] = x; P[o + 1] = y; P[o + 2] = z; P[o + 3] = CUR[j * 3]; P[o + 4] = CUR[j * 3 + 1]; P[o + 5] = CUR[j * 3 + 2];
+        C[o] = C[o + 3] = cr; C[o + 1] = C[o + 4] = cg; C[o + 2] = C[o + 5] = cb; nb++;
+      }
+    }
+  }
+  bondGeo.attributes.position.needsUpdate = true; bondGeo.attributes.color.needsUpdate = true; bondGeo.setDrawRange(0, nb * 2);
+}
 const neighLines = lineObj(16, 0xffe066, true); crystal.add(neighLines);
 const coreLines = lineObj(2, 0xffd34d, true); crystal.add(coreLines);
 const arrowLines = lineObj(9, 0xff6a3d, true); crystal.add(arrowLines);
@@ -549,7 +589,7 @@ function useSprite(tex, lx, ly, lz, size, aspect) {
 
 
 // ===================== MENÚ FIJO AL MUNDO =====================
-const MW = 1024, MH = 1400;
+const MW = 1024, MH = 1470;
 const menuCv = mkCanvas(MW, MH), menuG = menuCv.getContext('2d'), menuTex = canvasTex(menuCv);
 const menu = new THREE.Mesh(new THREE.PlaneGeometry(.72, .72 * MH / MW), new THREE.MeshBasicMaterial({ map: menuTex, fog: false, transparent: true }));
 menu.position.set(-0.98, 1.29, -0.72); menu.lookAt(0, 1.55, 0); scene.add(menu);
@@ -587,7 +627,7 @@ const TXT = {
     hcp: 'Hexagonal compacta (HCP): 6 átomos por celda hexagonal, NC = 12, FEA = 0,74, c/a ideal 1,633. Mg, Zn, Ti-α, Co, Zr. Apilamiento ABAB; desliza sobre todo en el plano basal (0001)<11-20> (solo 3 sistemas): por eso macla con facilidad.'
   },
   mode: {
-    perfect: 'Las líneas marcan la celda unidad (los átomos de la celda se ven más claros). Apuntá a un átomo y apretá el gatillo para ver sus primeros vecinos y el número de coordinación. Con "Sitios" ves los huecos octaédricos (celeste) o tetraédricos (violeta).',
+    perfect: 'Con "Enlaces" ves las uniones a primeros vecinos (en los metales el enlace es metálico: iones positivos en un mar de electrones); su color indica si están comprimidos (azul) o estirados (rojo). Las líneas blancas marcan la celda unidad (los átomos de la celda se ven más claros). Apuntá a un átomo y apretá el gatillo para ver sus primeros vecinos y el número de coordinación. Con "Sitios" ves los huecos octaédricos (celeste) o tetraédricos (violeta).',
     vac: 'Vacancia: sitio de red vacío (marcado en rojo). Su concentración de equilibrio crece con T: Nv = N·exp(−Qv/kT). Los vecinos se relajan hacia el hueco. Gatillo sobre un átomo: lo sacás (o lo devolvés si apuntás al hueco). A: un vecino salta al hueco → así difunden los átomos sustitucionales. Par de Frenkel: un átomo se va a un intersticio y deja su vacancia.',
     int: 'Intersticial: átomo chico (C, N, H, B) alojado en un hueco de la red. Gatillo: agregar en el sitio apuntado o quitar. A: salto a un sitio vecino (difusión intersticial, mucho más rápida que la sustitucional). El C entra en el hueco octaédrico; el del Fe-γ (FCC) es más grande que el del Fe-α (BCC): por eso la austenita disuelve hasta 2,11 % C y la ferrita solo 0,022 %. Fijate la distorsión tetragonal en BCC.',
     sub: 'Sustitucional: el soluto reemplaza a un átomo del solvente (Zn en Cu = latón, Ni en Cu). Reglas de Hume-Rothery para solubilidad amplia: ΔR < 15 %, misma estructura, electronegatividad y valencia parecidas. Gatillo sobre un átomo: soluto grande (azul, comprime alrededor) → chico (verde, tracciona) → solvente. Estos campos de tensión traban dislocaciones: endurecimiento por solución sólida.',
@@ -615,6 +655,7 @@ function optButtons() {
     { id: 'sound', label: 'Sonido: ' + (st.sound ? 'sí' : 'no'), on: st.sound, en: true },
     { id: 'guides', label: 'Guías y planos', on: st.guides, en: true },
     { id: 'rot', label: 'Girar 90°', on: false, en: true },
+    { id: 'bonds', label: 'Enlaces: ' + (st.bonds ? 'visibles' : 'ocultos'), on: st.bonds, en: true },
   ];
 }
 
@@ -645,13 +686,13 @@ function drawMenu() {
   MODES.forEach((m, i) => button(g, { id: 'mode:' + m.id, label: m.nombre, x: 24 + (i % 2) * 492, y: 284 + Math.floor(i / 2) * 82, w: 480, h: 70, on: st.mode === m.id }));
   sec('OPCIONES', 630);
   optButtons().forEach((o, i) => button(g, { ...o, small: true, x: 24 + (i % 3) * 330, y: 646 + Math.floor(i / 3) * 70, w: 316, h: 60 }));
-  sec('INFORMACIÓN', 945);
-  rr(g, 24, 960, MW - 48, MH - 984, 16); g.fillStyle = '#1b2233'; g.fill();
+  sec('INFORMACIÓN', 1015);
+  rr(g, 24, 1030, MW - 48, MH - 1054, 16); g.fillStyle = '#1b2233'; g.fill();
   g.textAlign = 'left'; g.textBaseline = 'alphabetic';
   g.fillStyle = '#ffd34d'; g.font = 'bold 26px system-ui, sans-serif';
-  g.fillText(`${L.corto} · ${modeName(st.mode)}  —  ej.: ${L.ej}`, 44, 998);
+  g.fillText(`${L.corto} · ${modeName(st.mode)}  —  ej.: ${L.ej}`, 44, 1068);
   g.font = '22px system-ui, sans-serif'; g.fillStyle = '#c9d4ea';
-  let y = wrap(g, TXT.lat[st.lat], 44, 1032, MW - 88, 28, MH - 40);
+  let y = wrap(g, TXT.lat[st.lat], 44, 1102, MW - 88, 28, MH - 40);
   g.fillStyle = '#eef3ff';
   wrap(g, TXT.mode[st.mode], 44, y + 10, MW - 88, 28, MH - 34);
   menuTex.needsUpdate = true; menuDirty = false;
@@ -1214,6 +1255,7 @@ function doMenu(id) {
     case 'center': crystal.position.copy(HOME); crystal.quaternion.identity(); userScale = 1; crystal.scale.setScalar(baseScale()); break;
     case 'sound': st.sound = !st.sound; break;
     case 'guides': st.guides = !st.guides; break;
+    case 'bonds': st.bonds = !st.bonds; bondTimer = 0; break;
     case 'rot': crystal.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), Math.PI / 2); break;
   }
   menuDirty = true;
@@ -1303,13 +1345,15 @@ function vrInput(dt) {
   if (edge('right', 'b')) { buildModel(); sfx('click'); }
   if (edge('left', 'a')) { st.compact = !st.compact; menuDirty = posDirty = true; }
   if (edge('left', 'b')) { st.guides = !st.guides; menuDirty = true; }
-  // stick derecho: τ (o ángulo / escala); stick izquierdo: girar la red
-  const ry = -dz(R.sy || 0), rx = dz(R.sx || 0), lx = dz(Lf.sx || 0), ly = dz(Lf.sy || 0);
+  // stick derecho: solo τ (o ángulo / escala), nunca gira la red; stick izquierdo: girar la red
+  const ry = -dz(R.sy || 0); let lx = dz(Lf.sx || 0), ly = dz(Lf.sy || 0);
+  if (Math.abs(lx) > Math.abs(ly)) ly = 0; else lx = 0; // un eje por vez
+  st.vrTauActive = ry !== 0;
   if (['edge', 'screw', 'twin'].includes(st.mode)) st.stickTau = ry;
   else if (st.mode === 'gb' && ry) { st.gbAngle = clamp(st.gbAngle + ry * 12 * dt, 0, 45); sliderDirty = true; }
   else if (ry && !Object.keys(grabbers).length) { userScale = clamp(userScale * Math.exp(ry * dt), .3, 5); crystal.scale.setScalar(baseScale() * userScale); }
   if (!Object.keys(grabbers).length) {
-    if (rx || lx) crystal.rotateOnWorldAxis(UPV, (rx + lx) * 1.6 * dt);
+    if (lx) crystal.rotateOnWorldAxis(UPV, lx * 1.6 * dt);
     if (ly) crystal.rotateOnWorldAxis(head.right, ly * 1.6 * dt);
   }
 }
@@ -1341,7 +1385,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Tab') { e.preventDefault(); const i = MODES.findIndex(m => m.id === st.mode); setMode(MODES[(i + (e.shiftKey ? MODES.length - 1 : 1)) % MODES.length].id); return; }
   if (e.repeat) return;
   const lat = { '1': 'sc', '2': 'bcc', '3': 'fcc', '4': 'hcp' }[k]; if (lat) { setLattice(lat); return; }
-  const map = { ' ': 'action', b: 'reset', backspace: 'reset', t: 'size', g: 'guides', i: 'sites', o: 'stype', p: 'partials', c: 'cyclic', f: 'frenkel', m: 'sound', h: 'center', j: 'rot' };
+  const map = { ' ': 'action', b: 'reset', backspace: 'reset', t: 'size', g: 'guides', i: 'sites', o: 'stype', p: 'partials', c: 'cyclic', f: 'frenkel', m: 'sound', h: 'center', j: 'rot', e: 'bonds' };
   if (map[k]) { if (k === ' ') e.preventDefault(); doMenu(map[k]); sfx('click'); }
   if (k === '0') { st.sliderTau = 0; sliderDirty = true; }
 });
@@ -1427,6 +1471,8 @@ function loop(time) {
   if (relaxDirty) relax();
   if (JUMP) { JUMP.t += dt; if (JUMP.t >= JUMP.dur) { const i = JUMP.i; JUMP = null; if (i < N) CUR.set(TGT.subarray(i * 3, i * 3 + 3), i * 3); } }
   if (posDirty || JUMP) updateMatrices(dt);
+  if (st.bonds) { if ((bondTimer -= dt) <= 0) { bondTimer = (MD.kind === 'disl' || MD.kind === 'twin' || JUMP || posDirty) ? 0 : .5; updateBonds(); } }
+  else if (bondGeo.drawRange.count) bondGeo.setDrawRange(0, 0);
   if (SEL >= 0 && (neighTimer -= dt) <= 0) { neighTimer = .2; updateNeighbors(); }
   if (colDirty) updateColors();
   updateSites();
