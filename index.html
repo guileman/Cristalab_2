@@ -33,7 +33,7 @@
   Clic izq.: botones del menú / átomos · Clic der. sostenido: agarrar la red · Rueda: escala<br>
   WASD: caminar · ↑ ↓: esfuerzo de corte τ (o ángulo θ) · Q/E, ←/→, R/F: girar la red<br>
   Espacio: acción (A) · B: reiniciar defecto · Tab: siguiente defecto · 1-4: tipo de red<br>
-  T: tamaño de átomos · G: guías · I: sitios · O: tipo de sitio · P: parciales · C: carga cíclica · F: par de Frenkel · J: girar 90° · H: recentrar · M: sonido · 0: τ = 0
+  Z: resetear todo · T: tamaño de átomos · G: guías · I: sitios · O: tipo de sitio · P: parciales · C: carga cíclica · F: par de Frenkel · J: girar 90° · H: recentrar · M: sonido · 0: τ = 0
 </div>
 <div id="mira"></div>
 <script type="module">
@@ -332,6 +332,7 @@ function buildGB(L, thetaDeg) {
 const NN_VIS = 0.075;         // distancia entre primeros vecinos en el modelo (m) → ≈ 3·10⁸ aumentos
 const MAX = 1800, MAXS = 1600, MAXV = 128;
 const HOME = new THREE.Vector3(0, 1.32, -1.1);
+const station = new THREE.Group(); // pedestal + menú + barra: se reubican juntos frente al jugador
 
 const MODES = [
   { id: 'perfect', nombre: 'Red perfecta' },
@@ -440,7 +441,7 @@ const SUN_DIR = sun.position.clone().normalize();
 { // pedestal torneado bajo el cristal
   const pts = [[0, 0], [.32, 0], [.34, .05], [.2, .1], [.12, .2], [.1, .6], [.16, .7], [.3, .74], [.3, .78], [0, .78]].map(p => new THREE.Vector2(p[0], p[1]));
   const ped = new THREE.Mesh(new THREE.LatheGeometry(pts, 10), new THREE.MeshLambertMaterial({ color: 0x6d7480, flatShading: true }));
-  ped.position.set(HOME.x, 0.04, HOME.z); ped.scale.set(1, 1.0, 1); scene.add(ped);
+  ped.position.set(HOME.x, 0.04, HOME.z); ped.scale.set(1, 1.0, 1); station.add(ped);
 }
 { // árboles low-poly instanciados
   const n = 40, trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.18, .25, 2, 6), new THREE.MeshLambertMaterial({ color: 0x6b4a2e, flatShading: true }), n);
@@ -592,7 +593,7 @@ function useSprite(tex, lx, ly, lz, size, aspect) {
 const MW = 1024, MH = 1470;
 const menuCv = mkCanvas(MW, MH), menuG = menuCv.getContext('2d'), menuTex = canvasTex(menuCv);
 const menu = new THREE.Mesh(new THREE.PlaneGeometry(.72, .72 * MH / MW), new THREE.MeshBasicMaterial({ map: menuTex, fog: false, transparent: true }));
-menu.position.set(-0.98, 1.29, -0.72); menu.lookAt(0, 1.55, 0); scene.add(menu);
+menu.position.set(-0.98, 1.29, -0.72); menu.lookAt(0, 1.55, 0); station.add(menu);
 { // marco y patas del atril
   const fr = new THREE.Mesh(new THREE.BoxGeometry(.76, .76 * MH / MW + .04, .02), new THREE.MeshLambertMaterial({ color: 0x2a3140, flatShading: true }));
   fr.position.set(0, 0, -.012); menu.add(fr);
@@ -610,7 +611,7 @@ hud.position.set(0, .72 * MH / MW / 2 + .085, 0); menu.add(hud);
 const SW = 512, SH = 150;
 const sliderCv = mkCanvas(SW, SH), sliderG = sliderCv.getContext('2d'), sliderTex = canvasTex(sliderCv);
 const slider = new THREE.Mesh(new THREE.PlaneGeometry(.62, .62 * SH / SW), new THREE.MeshBasicMaterial({ map: sliderTex, fog: false, transparent: true }));
-slider.position.set(0.86, 1.12, -0.82); slider.lookAt(0, 1.4, 0); scene.add(slider);
+slider.position.set(0.86, 1.12, -0.82); slider.lookAt(0, 1.4, 0); station.add(slider); scene.add(station);
 {
   const fr = new THREE.Mesh(new THREE.BoxGeometry(.66, .62 * SH / SW + .04, .02), new THREE.MeshLambertMaterial({ color: 0x2a3140, flatShading: true }));
   fr.position.z = -.012; slider.add(fr);
@@ -655,6 +656,8 @@ function optButtons() {
     { id: 'sound', label: 'Sonido: ' + (st.sound ? 'sí' : 'no'), on: st.sound, en: true },
     { id: 'guides', label: 'Guías y planos', on: st.guides, en: true },
     { id: 'rot', label: 'Girar 90°', on: false, en: true },
+    { id: 'resetall', label: 'Resetear todo', on: false, en: true },
+    { id: 'exit', label: renderer.xr.isPresenting ? 'Salir de VR' : 'Salir (soltar mouse)', on: false, en: true, danger: true },
     { id: 'bonds', label: 'Enlaces: ' + (st.bonds ? 'visibles' : 'ocultos'), on: st.bonds, en: true },
   ];
 }
@@ -662,7 +665,7 @@ function optButtons() {
 function button(g, b, big) {
   const hov = hoverId === b.id && b.en !== false;
   rr(g, b.x, b.y, b.w, b.h, 14);
-  g.fillStyle = b.en === false ? '#262c3a' : b.on ? (hov ? '#3c8cff' : '#2d6fd6') : (hov ? '#3d4a66' : '#2e3850'); g.fill();
+  g.fillStyle = b.en === false ? '#262c3a' : b.danger ? (hov ? '#c2423a' : '#8e2f2a') : b.on ? (hov ? '#3c8cff' : '#2d6fd6') : (hov ? '#3d4a66' : '#2e3850'); g.fill();
   g.lineWidth = hov ? 4 : 2; g.strokeStyle = b.on ? '#9cc6ff' : hov ? '#9fb3d9' : '#46526e'; g.stroke();
   g.fillStyle = b.en === false ? '#5e6779' : '#f1f5ff'; g.textAlign = 'center'; g.textBaseline = 'middle';
   if (big) {
@@ -1096,7 +1099,29 @@ async function initAudio() {
   } catch (e) { console.warn('Audio no disponible', e); }
 }
 addEventListener('pointerdown', initAudio); addEventListener('keydown', initAudio);
-renderer.xr.addEventListener('sessionstart', () => { initAudio(); renderer.xr.setFoveation(1); });
+renderer.xr.addEventListener('sessionstart', () => { initAudio(); renderer.xr.setFoveation(1); pendingAnchor = 3; menuDirty = true; });
+renderer.xr.addEventListener('sessionend', () => { menuDirty = true; for (const k of Object.keys(grabbers)) endGrab(k); placeStation(new THREE.Vector3(0, 0, 0), 0); homeCrystal(); });
+
+// ---------- reubicar / resetear / salir ----------
+let pendingAnchor = 0;
+function placeStation(pos, yawAng) { station.position.set(pos.x, 0, pos.z); station.rotation.set(0, yawAng, 0); station.updateMatrixWorld(true); }
+function homeCrystal() {
+  crystal.position.copy(HOME).applyMatrix4(station.matrixWorld);
+  crystal.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), station.rotation.y);
+  userScale = 1; crystal.scale.setScalar(baseScale());
+}
+function anchorToHead() { placeStation(head.pos, -head.rumbo); homeCrystal(); }
+function resetAll() {
+  for (const k of Object.keys(grabbers)) endGrab(k);
+  st.sliderTau = 0; st.keyTau = 0; st.cyclic = false; st.gbAngle = 8; drag = null;
+  if (!renderer.xr.isPresenting) { camera.position.set(0, 1.7, 0); yaw = 0; pitch = -0.2; camera.rotation.set(pitch, yaw, 0, 'YXZ'); camera.updateMatrixWorld(); updateHead(); placeStation(new THREE.Vector3(), 0); homeCrystal(); }
+  else anchorToHead();
+  buildModel(); sfx('step'); haptic('right', .5, 40); haptic('left', .5, 40);
+}
+function exitApp() {
+  const s = renderer.xr.getSession();
+  if (s) s.end(); else if (document.pointerLockElement) document.exitPointerLock();
+}
 const _pv = new THREE.Vector3();
 function panOf(obj) { obj.getWorldPosition(_pv); _pv.sub(head.pos).normalize(); return clamp(_pv.dot(head.right), -1, 1); }
 function sfx(k, o = {}) { if (audio.ready && st.sound) audio.node.port.postMessage({ t: 'ev', k, pan: o.pan ?? panOf(crystal), ...o }); }
@@ -1252,7 +1277,9 @@ function doMenu(id) {
     case 'frenkel': frenkel(); break;
     case 'action': actionA(); break;
     case 'reset': buildModel(); break;
-    case 'center': crystal.position.copy(HOME); crystal.quaternion.identity(); userScale = 1; crystal.scale.setScalar(baseScale()); break;
+    case 'center': homeCrystal(); break;
+    case 'resetall': resetAll(); break;
+    case 'exit': exitApp(); break;
     case 'sound': st.sound = !st.sound; break;
     case 'guides': st.guides = !st.guides; break;
     case 'bonds': st.bonds = !st.bonds; bondTimer = 0; break;
@@ -1385,7 +1412,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Tab') { e.preventDefault(); const i = MODES.findIndex(m => m.id === st.mode); setMode(MODES[(i + (e.shiftKey ? MODES.length - 1 : 1)) % MODES.length].id); return; }
   if (e.repeat) return;
   const lat = { '1': 'sc', '2': 'bcc', '3': 'fcc', '4': 'hcp' }[k]; if (lat) { setLattice(lat); return; }
-  const map = { ' ': 'action', b: 'reset', backspace: 'reset', t: 'size', g: 'guides', i: 'sites', o: 'stype', p: 'partials', c: 'cyclic', f: 'frenkel', m: 'sound', h: 'center', j: 'rot', e: 'bonds' };
+  const map = { ' ': 'action', b: 'reset', backspace: 'reset', t: 'size', g: 'guides', i: 'sites', o: 'stype', p: 'partials', c: 'cyclic', f: 'frenkel', m: 'sound', h: 'center', j: 'rot', e: 'bonds', z: 'resetall', escape: 'exit' };
   if (map[k]) { if (k === ' ') e.preventDefault(); doMenu(map[k]); sfx('click'); }
   if (k === '0') { st.sliderTau = 0; sliderDirty = true; }
 });
@@ -1456,6 +1483,7 @@ function loop(time) {
   if (xr) renderer.xr.updateCamera(camera);
   else desktopInput(dt);
   updateHead();
+  if (xr && pendingAnchor > 0 && --pendingAnchor === 0) anchorToHead(); // al entrar en VR, todo frente al jugador
   if (xr) vrInput(dt); else desktopHover();
   updateGrab();
 
