@@ -10,6 +10,14 @@
   #info { position: absolute; left: 16px; top: 16px; max-width: 470px; background: rgba(12,17,30,.86); padding: 14px 18px; border-radius: 12px; font-size: 14px; line-height: 1.5; border: 1px solid #2f3a55; }
   #info h1 { margin: 0 0 6px; font-size: 20px; color: #ffd34d; }
   #info b { color: #9cc6ff; }
+  #galeria { position: absolute; right: 16px; bottom: 16px; width: 340px; max-height: 70vh; overflow: auto; background: rgba(12,17,30,.94); border: 1px solid #2f3a55; border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.4; display: none; }
+  #galeria h2 { margin: 0 0 6px; font-size: 16px; color: #ffd34d; display: flex; justify-content: space-between; align-items: center; }
+  #galeria h2 button { background: none; border: 0; color: #9fb0cf; font-size: 22px; cursor: pointer; }
+  #galeria .it { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
+  #galeria img, #galeria video { width: 130px; border-radius: 6px; background: #000; }
+  #galeria .it div { word-break: break-all; font-size: 11px; color: #9fb0cf; }
+  #galeria a { color: #9cc6ff; font-size: 13px; }
+  #galeria p { margin: 8px 0 0; color: #8fa0c0; font-size: 12px; }
   #mira { position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; pointer-events: none; }
   #mira::before, #mira::after { content: ""; position: absolute; background: rgba(255,255,255,.85); }
   #mira::before { left: 7px; top: 0; width: 2px; height: 16px; }
@@ -33,9 +41,10 @@
   Clic izq.: botones del menú / átomos · Clic der. sostenido: agarrar la red · Rueda: escala<br>
   WASD: caminar · ↑ ↓: esfuerzo de corte τ (o ángulo θ) · Q/E, ←/→, R/F: girar la red<br>
   Espacio: acción (A) · B: reiniciar defecto · Tab: siguiente defecto · 1-4: tipo de red<br>
-  Z: resetear todo · T: tamaño de átomos · G: planos principales · I: sitios · O: tipo de sitio · P: parciales · C: carga cíclica · F: par de Frenkel · J: girar 90° · H: recentrar · M: sonido · 0: τ = 0
+  Z: resetear todo · T: tamaño de átomos · G: planos principales · I: sitios · O: tipo de sitio · P: parciales · C: carga cíclica · F: par de Frenkel · K: foto · V: video · J: girar 90° · H: recentrar · M: sonido · 0: τ = 0
 </div>
 <div id="mira"></div>
+<div id="galeria"></div>
 <script type="module">
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
@@ -348,7 +357,7 @@ const modeName = id => MODES.find(m => m.id === id).nombre;
 
 const st = {
   lat: 'fcc', mode: 'edge', compact: false, showSites: false, siteType: 0, partials: false,
-  cyclic: false, sound: true, guides: true, bonds: false, plane: 0, help: false,
+  cyclic: false, sound: true, guides: true, bonds: false, plane: 0, help: false, capPreview: false, capFrame: 'cristal', capAuto: true,
   sliderTau: 0, stickTau: 0, keyTau: 0, tau: 0, gbAngle: 8, time: 0,
 };
 let L = LAT[st.lat];
@@ -625,6 +634,18 @@ slider.position.set(0.86, 1.12, -0.82); slider.lookAt(0, 1.4, 0); station.add(sl
   const leg = new THREE.Mesh(new THREE.CylinderGeometry(.02, .03, 1.05, 6), new THREE.MeshLambertMaterial({ color: 0x4a5160, flatShading: true }));
   leg.position.set(0, -.6, -.05); slider.add(leg);
 }
+// panel de cámara: vista previa + botones de foto y video, apilado sobre la barra de esfuerzo
+const CW = 800, CH = 740;
+const capCvP = mkCanvas(CW, CH), capG = capCvP.getContext('2d'), capTex = canvasTex(capCvP);
+const capPanel = new THREE.Mesh(new THREE.PlaneGeometry(.5, .5 * CH / CW), new THREE.MeshBasicMaterial({ map: capTex, fog: false, transparent: true }));
+capPanel.position.set(0, .39, 0); slider.add(capPanel);
+{
+  const fr = new THREE.Mesh(new THREE.BoxGeometry(.54, .5 * CH / CW + .04, .02), new THREE.MeshLambertMaterial({ color: 0x2a3140, flatShading: true }));
+  fr.position.z = -.012; capPanel.add(fr);
+  const leg2 = new THREE.Mesh(new THREE.CylinderGeometry(.02, .02, .5, 6), new THREE.MeshLambertMaterial({ color: 0x4a5160, flatShading: true }));
+  leg2.position.set(0, -.1, -.05); capPanel.add(leg2);
+}
+let capButtons = [], capDirty = true;
 
 let menuButtons = [], hoverId = null, menuDirty = true, sliderDirty = true;
 const TXT = {
@@ -635,8 +656,8 @@ const TXT = {
     hcp: 'Hexagonal compacta (HCP): 6 átomos por celda hexagonal, NC = 12, FEA = 0,74, c/a ideal 1,633. Mg, Zn, Ti-α, Co, Zr. Apilamiento ABAB; desliza sobre todo en el plano basal (0001)<11-20> (solo 3 sistemas): por eso macla con facilidad.'
   },
   help: {
-    vr: 'Gatillo: botones del menú, barra de τ (mantenelo apretado y deslizá) y elegir átomos.\nAgarre (lateral): agarrar y mover la red; con las dos manos a la vez: girar y escalar.\nStick derecho ↑↓: esfuerzo de corte τ (o el ángulo θ en límite de grano).\nStick izquierdo: girar la red (un eje por vez).\nA (derecho): acción del defecto · B (derecho): reiniciar el defecto.\nX (izquierdo): átomos reducidos / compactos · Y (izquierdo): planos principales.\nEn SISTEMA: recentrar la red, resetear todo, sonido y salir de VR.',
-    pc: 'Clic: botones del menú, barra de τ y elegir átomos · Clic derecho sostenido: agarrar la red · Rueda: escala.\nWASD: caminar · ↑↓: esfuerzo de corte τ (o ángulo θ) · Q/E, ←/→, R/F: girar la red.\nEspacio: acción del defecto · B: reiniciar el defecto · Tab: siguiente defecto · 1-4: tipo de red.\nG: planos principales · T: tamaño de átomos · I/O: sitios · P: parciales · C: carga cíclica · F: par de Frenkel · E: enlaces.\nJ: girar 90° · H: recentrar · Z: resetear todo · M: sonido · Esc: salir.'
+    vr: 'Gatillo: botones del menú, barra de τ (mantenelo apretado y deslizá) y elegir átomos.\nAgarre (lateral): agarrar y mover la red; con las dos manos a la vez: girar y escalar.\nStick derecho ↑↓: esfuerzo de corte τ (o el ángulo θ en límite de grano).\nStick izquierdo: girar la red (un eje por vez).\nA (derecho): acción del defecto · B (derecho): reiniciar el defecto.\nX (izquierdo): tomar foto · clic del stick izquierdo: empezar / detener video · Y (izquierdo): planos principales.\nEl panel CÁMARA (sobre la barra de τ) tiene vista previa y las opciones de captura. En SISTEMA: recentrar la red, resetear todo, sonido y salir de VR.',
+    pc: 'Clic: botones del menú, barra de τ y elegir átomos · Clic derecho sostenido: agarrar la red · Rueda: escala.\nWASD: caminar · ↑↓: esfuerzo de corte τ (o ángulo θ) · Q/E, ←/→, R/F: girar la red.\nEspacio: acción del defecto · B: reiniciar el defecto · Tab: siguiente defecto · 1-4: tipo de red.\nK: foto · V: video · G: planos principales · T: tamaño de átomos · I/O: sitios · P: parciales · C: carga cíclica · F: par de Frenkel · E: enlaces.\nJ: girar 90° · H: recentrar · Z: resetear todo · M: sonido · Esc: salir.'
   },
   mode: {
     perfect: 'Con "Enlaces" ves las uniones a primeros vecinos (en los metales el enlace es metálico: iones positivos en un mar de electrones); su color indica si están comprimidos (azul) o estirados (rojo). Las líneas blancas marcan la celda unidad (los átomos de la celda se ven más claros). Con "Planos principales" recorrés los planos más importantes de la red: se marca el plano que pasa por el centro y las capas se colorean según su apilamiento (A, B, C…), con su distancia interplanar y densidad plana. Apuntá a un átomo y apretá el gatillo para ver sus primeros vecinos y el número de coordinación. Con "Sitios" ves los huecos octaédricos (celeste) o tetraédricos (violeta).',
@@ -686,7 +707,7 @@ function drawLogo(g, x, y, w, h) {
   g.fillStyle = '#eef3ff'; g.font = 'bold 30px system-ui, sans-serif'; g.fillText('FRSN', x + w / 2, y + h * .72);
 }
 
-function button(g, b, big) {
+function button(g, b, big, list = menuButtons) {
   const hov = hoverId === b.id && b.en !== false;
   rr(g, b.x, b.y, b.w, b.h, 14);
   g.fillStyle = b.en === false ? '#262c3a' : b.danger ? (hov ? '#c2423a' : '#8e2f2a') : b.on ? (hov ? '#3c8cff' : '#2d6fd6') : (hov ? '#3d4a66' : '#2e3850'); g.fill();
@@ -696,7 +717,7 @@ function button(g, b, big) {
     g.font = 'bold 44px system-ui, sans-serif'; g.fillText(b.label, b.x + b.w / 2, b.y + 38);
     g.font = '19px system-ui, sans-serif'; g.fillStyle = b.on ? '#e5efff' : '#a9b4cc'; g.fillText(b.sub, b.x + b.w / 2, b.y + 78);
   } else { g.font = (b.small ? '23px' : 'bold 27px') + ' system-ui, sans-serif'; g.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 1); }
-  menuButtons.push(b);
+  list.push(b);
 }
 
 function drawMenu() {
@@ -1188,7 +1209,7 @@ class Synth extends AudioWorkletProcessor {
   ev(m){ if(this.v.length>24) this.v.shift(); const f=new BQ(), sr=this.sr; const v={ k:m.k, t:0, pan:m.pan||0, f:m.f||1000, g:m.g||1, up:m.up, flt:f, ph:0, ph2:0, ph3:0 };
     if(m.k==='tick'){ v.dur=.16; f.set('hp',2500,.7,sr); } else if(m.k==='click'){ v.dur=.05; } else if(m.k==='pop'){ v.dur=.16; }
     else if(m.k==='jump'){ v.dur=.5; f.set('bp',500,3,sr); } else if(m.k==='step'){ v.dur=.45; f.set('lp',400,.8,sr); }
-    else if(m.k==='crackle'){ v.dur=.12; f.set('bp',3200,2.5,sr); } else if(m.k==='grab'){ v.dur=.12; } else v.dur=.2;
+    else if(m.k==='crackle'){ v.dur=.12; f.set('bp',3200,2.5,sr); } else if(m.k==='grab'){ v.dur=.12; } else if(m.k==='shutter'){ v.dur=.22; f.set('bp',2800,1.4,sr); } else v.dur=.2;
     this.v.push(v); }
   process(_, outs){ const o=outs[0], L=o[0], R=o[1]||o[0], n=L.length, sr=this.sr, st=this.st, TAU=2*Math.PI;
     const tgtOn = st.on?1:0; const cf = 220 + 900*Math.abs(st.tau); this.cr.set('bp', cf, 5, sr); this.cr2.set('bp', cf*2.3, 6, sr);
@@ -1209,6 +1230,7 @@ class Synth extends AudioWorkletProcessor {
         else if(v.k==='jump'){ v.flt.set('bp',400+2200*Math.sin(Math.PI*u),3,sr); s=v.flt.p(Math.random()*2-1)*Math.sin(Math.PI*u)*.9; }
         else if(v.k==='step'){ v.ph+=(95-40*u)/sr; s=Math.sin(TAU*v.ph)*Math.exp(-v.t*9)*.7 + v.flt.p(Math.random()*2-1)*Math.exp(-v.t*25)*.6; }
         else if(v.k==='crackle'){ const imp = Math.random()<.02 ? (Math.random()*2-1) : 0; s=v.flt.p(imp*6 + (Math.random()*2-1)*.15)*(1-u)*.8; }
+        else if(v.k==='shutter'){ s=v.flt.p(Math.random()*2-1)*Math.exp(-v.t*30)*1.1+Math.sin(TAU*1200*v.t)*Math.exp(-v.t*90)*.3; }
         else if(v.k==='grab'){ v.ph+=(v.up?330:220)/sr; s=Math.sin(TAU*v.ph)*Math.sin(Math.PI*u)*.2; }
         s*=v.g; const p=(v.pan+1)*Math.PI/4; l+=s*Math.cos(p); r+=s*Math.sin(p); v.t+=1/sr; }
       L[i]=Math.tanh(l*1.3*this.on)*.85; R[i]=Math.tanh(r*1.3*this.on)*.85; }
@@ -1222,12 +1244,14 @@ async function initAudio() {
     const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
     await audio.ctx.audioWorklet.addModule(url);
     audio.node = new AudioWorkletNode(audio.ctx, 'synth', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
-    audio.node.connect(audio.ctx.destination); audio.ready = true; audio.ctx.resume();
+    audio.node.connect(audio.ctx.destination);
+    audio.dest = audio.ctx.createMediaStreamDestination(); audio.node.connect(audio.dest); // para que el video grabado lleve el sonido
+    audio.ready = true; audio.ctx.resume();
   } catch (e) { console.warn('Audio no disponible', e); }
 }
 addEventListener('pointerdown', initAudio); addEventListener('keydown', initAudio);
 renderer.xr.addEventListener('sessionstart', () => { initAudio(); renderer.xr.setFoveation(1); pendingAnchor = 3; menuDirty = true; });
-renderer.xr.addEventListener('sessionend', () => { menuDirty = true; for (const k of Object.keys(grabbers)) endGrab(k); placeStation(new THREE.Vector3(0, 0, 0), 0); homeCrystal(); });
+renderer.xr.addEventListener('sessionend', () => { if (cap.items.length) galOpen = true; updateGalleryVis(); menuDirty = true; for (const k of Object.keys(grabbers)) endGrab(k); placeStation(new THREE.Vector3(0, 0, 0), 0); homeCrystal(); });
 
 // ---------- reubicar / resetear / salir ----------
 let pendingAnchor = 0;
@@ -1275,13 +1299,14 @@ function buildControllerModel() {
   const ring = new THREE.Mesh(new THREE.TorusGeometry(.04, .006, 4, 10), new THREE.MeshLambertMaterial({ color: 0x5a6070, flatShading: true }));
   ring.position.set(0, .01, -.03); ring.rotation.x = .9; g.add(ring); return g;
 }
+const allHands = [];
 for (let i = 0; i < 2; i++) {
   const ctrl = renderer.xr.getController(i), grip = renderer.xr.getControllerGrip(i);
   scene.add(ctrl, grip); grip.add(buildControllerModel());
   const lg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
   const line = new THREE.Line(lg, new THREE.LineBasicMaterial({ color: 0x9cd0ff, transparent: true, opacity: .8, fog: false })); line.visible = false; ctrl.add(line);
   const dot = new THREE.Mesh(new THREE.SphereGeometry(.008, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, fog: false })); dot.renderOrder = 998; dot.visible = false; scene.add(dot);
-  const h = { ctrl, grip, line, dot };
+  const h = { ctrl, grip, line, dot }; allHands.push(h);
   ctrl.addEventListener('connected', e => { const hd = e.data.handedness === 'left' ? 'left' : 'right'; hands[hd] = h; h.hand = hd; line.visible = true; });
   ctrl.addEventListener('disconnected', () => { if (h.hand && hands[h.hand] === h) hands[h.hand] = null; line.visible = false; dot.visible = false; });
 }
@@ -1323,7 +1348,7 @@ function updateGrab() {
 const _o = new THREE.Vector3(), _d = new THREE.Vector3(), _inv = new THREE.Matrix4();
 function rayHit(origin, dir) {
   ray.set(origin, dir); ray.far = 6;
-  const h = ray.intersectObjects([menu, slider], false)[0];
+  const h = ray.intersectObjects([menu, slider, capPanel], false)[0];
   return h || null;
 }
 function menuClickAt(uv) {
@@ -1409,6 +1434,8 @@ function doMenu(id) {
     case 'exit': exitApp(); break;
     case 'sound': st.sound = !st.sound; break;
     case 'plane': cyclePlane(); break;
+    case 'photo': takePhoto(); break;
+    case 'rec': toggleRec(); break;
     case 'help': st.help = !st.help; break;
     case 'bonds': st.bonds = !st.bonds; bondTimer = 0; break;
     case 'rot': crystal.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), Math.PI / 2); break;
@@ -1467,7 +1494,7 @@ function readPads() {
   for (const src of s.inputSources) {
     if (!src.gamepad || (src.handedness !== 'left' && src.handedness !== 'right')) continue;
     const b = src.gamepad.buttons, ax = src.gamepad.axes;
-    pads[src.handedness] = { trig: !!(b[0] && b[0].pressed), grip: !!(b[1] && b[1].pressed), a: !!(b[4] && b[4].pressed), b: !!(b[5] && b[5].pressed), sx: ax[2] || 0, sy: ax[3] || 0 };
+    pads[src.handedness] = { trig: !!(b[0] && b[0].pressed), grip: !!(b[1] && b[1].pressed), a: !!(b[4] && b[4].pressed), b: !!(b[5] && b[5].pressed), stk: !!(b[3] && b[3].pressed), sx: ax[2] || 0, sy: ax[3] || 0 };
   }
 }
 const edge = (h, k) => pads[h][k] && !prevPads[h][k];
@@ -1482,23 +1509,25 @@ function vrInput(dt) {
     h.ctrl.updateMatrixWorld(true); h.ctrl.getWorldPosition(_p); _q.setFromRotationMatrix(h.ctrl.matrixWorld); const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(_q);
     const hit = rayHit(_p, dir);
     let len = 3;
-    if (hit) { len = hit.distance; h.dot.visible = true; h.dot.position.copy(hit.point); if (hit.object === menu) newHover = menuHoverAt(hit.uv); }
+    if (hit) { len = hit.distance; h.dot.visible = true; h.dot.position.copy(hit.point); if (hit.object === menu) newHover = menuHoverAt(hit.uv); else if (hit.object === capPanel) newHover = capHoverAt(hit.uv); }
     else h.dot.visible = false;
     h.line.scale.z = len;
     if (edge(hd, 'trig')) {
       if (hit && hit.object === menu) { menuClickAt(hit.uv); haptic(hd, .3, 15); }
       else if (hit && hit.object === slider) { drag = { hand: hd }; sliderSet(hit.uv); }
+      else if (hit && hit.object === capPanel) { capClickAt(hit.uv); haptic(hd, .3, 15); }
       else crystalAction(_p, dir, hd);
     }
     if (drag && drag.hand === hd) { if (!p.trig) drag = null; else if (hit && hit.object === slider) sliderSet(hit.uv); }
     if (edge(hd, 'grip')) startGrab(hd, h.ctrl);
     if (!p.grip && prevPads[hd].grip) endGrab(hd);
   }
-  if (newHover !== hoverId) { hoverId = newHover; menuDirty = true; }
+  if (newHover !== hoverId) { hoverId = newHover; menuDirty = true; capDirty = true; }
   const R = pads.right, Lf = pads.left;
   if (edge('right', 'a')) actionA();
   if (edge('right', 'b')) { buildModel(); sfx('click'); }
-  if (edge('left', 'a')) { st.compact = !st.compact; menuDirty = posDirty = true; }
+  if (edge('left', 'a')) takePhoto();
+  if (edge('left', 'stk')) toggleRec();
   if (edge('left', 'b')) cyclePlane();
   // stick derecho: solo τ (o ángulo / escala), nunca gira la red; stick izquierdo: girar la red
   const ry = -dz(R.sy || 0); let lx = dz(Lf.sx || 0), ly = dz(Lf.sy || 0);
@@ -1524,6 +1553,7 @@ renderer.domElement.addEventListener('mousedown', e => {
     mouseDown = true; const hit = rayHit(head.pos, head.fwd);
     if (hit && hit.object === menu) menuClickAt(hit.uv);
     else if (hit && hit.object === slider) { drag = { hand: 'mouse' }; sliderSet(hit.uv); }
+    else if (hit && hit.object === capPanel) capClickAt(hit.uv);
     else crystalAction(head.pos, head.fwd, 'right');
   } else if (e.button === 2) startGrab('mouse', camera);
 });
@@ -1533,14 +1563,14 @@ addEventListener('mousemove', e => {
   yaw -= e.movementX * .0022; pitch = clamp(pitch - e.movementY * .0022, -1.5, 1.5);
 });
 addEventListener('wheel', e => { if (renderer.xr.isPresenting) return; userScale = clamp(userScale * Math.exp(-e.deltaY * .001), .3, 5); crystal.scale.setScalar(baseScale() * userScale); }, { passive: true });
-document.addEventListener('pointerlockchange', () => { info.style.display = document.pointerLockElement ? 'none' : 'block'; });
+document.addEventListener('pointerlockchange', () => { info.style.display = document.pointerLockElement ? 'none' : 'block'; if (!document.pointerLockElement && cap.items.length) galOpen = true; updateGalleryVis(); });
 addEventListener('keydown', e => {
   keys[e.code] = true; if (renderer.xr.isPresenting) return;
   const k = e.key.toLowerCase();
   if (e.code === 'Tab') { e.preventDefault(); const i = MODES.findIndex(m => m.id === st.mode); setMode(MODES[(i + (e.shiftKey ? MODES.length - 1 : 1)) % MODES.length].id); return; }
   if (e.repeat) return;
   const lat = { '1': 'sc', '2': 'bcc', '3': 'fcc', '4': 'hcp' }[k]; if (lat) { setLattice(lat); return; }
-  const map = { ' ': 'action', b: 'reset', backspace: 'reset', t: 'size', g: 'plane', i: 'sites', o: 'stype', p: 'partials', c: 'cyclic', f: 'frenkel', m: 'sound', h: 'center', j: 'rot', e: 'bonds', z: 'resetall', escape: 'exit' };
+  const map = { ' ': 'action', b: 'reset', backspace: 'reset', t: 'size', g: 'plane', i: 'sites', o: 'stype', p: 'partials', c: 'cyclic', f: 'frenkel', m: 'sound', h: 'center', j: 'rot', e: 'bonds', z: 'resetall', escape: 'exit', k: 'photo', v: 'rec' };
   if (map[k]) { if (k === ' ') e.preventDefault(); doMenu(map[k]); sfx('click'); }
   if (k === '0') { st.sliderTau = 0; sliderDirty = true; }
 });
@@ -1565,8 +1595,8 @@ function desktopInput(dt) {
   }
 }
 function desktopHover() {
-  const hit = rayHit(head.pos, head.fwd); const nh = hit && hit.object === menu ? menuHoverAt(hit.uv) : null;
-  if (nh !== hoverId) { hoverId = nh; menuDirty = true; }
+  const hit = rayHit(head.pos, head.fwd); const nh = hit && hit.object === menu ? menuHoverAt(hit.uv) : hit && hit.object === capPanel ? capHoverAt(hit.uv) : null;
+  if (nh !== hoverId) { hoverId = nh; menuDirty = true; capDirty = true; }
   if (drag && drag.hand === 'mouse' && hit && hit.object === slider) sliderSet(hit.uv);
 }
 
@@ -1587,19 +1617,185 @@ function drawHUD() {
       : `vacancias: ${v} · intersticiales: ${it} · solutos: ${so}`;
   }
   if (PLANE && MD.kind === 'block') l2 = PLANE.info;
-  const l1 = `${L.corto} · ${modeName(st.mode)}`, lr = `${Math.round(fps)} fps · ×${(3e8 * userScale).toExponential(0).replace('e+', '·10^')}`;
+  const l1 = `${L.corto} · ${modeName(st.mode)}`;
+  hudInfo.l1 = l1; hudInfo.l2 = l2;
+  const lr = cap.rec ? '● REC ' + mmss(cap.recSec) : cap.toast ? cap.toast : `${Math.round(fps)} fps · ×${(3e8 * userScale).toExponential(0).replace('e+', '·10^')}`;
   const key = l1 + l2 + lr + renderer.xr.isPresenting;
   if (key === hudKey) return; hudKey = key;
   g.clearRect(0, 0, 1024, 200); rr(g, 0, 0, 1024, 200, 26); g.fillStyle = 'rgba(16,21,34,.94)'; g.fill();
   g.textAlign = 'left'; g.textBaseline = 'alphabetic';
   g.fillStyle = '#ffd34d'; g.font = 'bold 40px system-ui, sans-serif'; g.fillText(l1, 28, 56);
-  g.textAlign = 'right'; g.fillStyle = '#8fa0c0'; g.font = '24px system-ui, sans-serif'; g.fillText(lr, 996, 54);
+  g.textAlign = 'right'; g.fillStyle = cap.rec ? '#ff5a5a' : cap.toast ? '#9dffcf' : '#8fa0c0'; g.font = (cap.rec || cap.toast ? 'bold ' : '') + '24px system-ui, sans-serif'; g.fillText(lr, 996, 54);
   g.textAlign = 'left'; g.fillStyle = '#eef3ff';
   fitText(g, l2, 28, 112, 968, 30);
   g.fillStyle = '#9fb0cf';
-  fitText(g, renderer.xr.isPresenting ? 'Gatillo: menú/átomos · Agarre: mover (2 manos: escalar) · Stick der.: τ · Stick izq.: girar · A: acción · B: reiniciar · Y: planos'
-    : 'Clic: menú / átomos · Clic der.: agarrar · Rueda: escala · ↑↓: τ · Q/E R/F: girar · Espacio: acción · B: reiniciar · Tab: defecto · 1-4: red · G: planos', 28, 166, 968, 24);
+  fitText(g, renderer.xr.isPresenting ? 'Gatillo: menú/átomos · Agarre: mover (2 manos: escalar) · Stick der.: τ · Stick izq.: girar · A: acción · B: reiniciar · X: foto · clic stick izq.: video · Y: planos'
+    : 'Clic: menú / átomos · Clic der.: agarrar · Rueda: escala · ↑↓: τ · Q/E R/F: girar · Espacio: acción · B: reiniciar · Tab: defecto · 1-4: red · G: planos · K: foto · V: video', 28, 166, 968, 24);
   hudTex.needsUpdate = true;
+}
+
+// ===================== CAPTURA: FOTO Y VIDEO =====================
+// No se puede leer el cuadro de WebXR, así que un segundo renderer fuera de pantalla filma el cristal con una
+// cámara virtual (estable, o "mi vista"). Sale sin menús ni mandos y con un rótulo con los datos del defecto.
+const cap = { ok: false, R: null, gl: null, cv: null, g: null, cam: new THREE.PerspectiveCamera(45, 16 / 9, .05, 1000), w: 0, h: 0, acc: 0, pAcc: 0,
+  vw: 1280, vh: 720, dir: new THREE.Vector3(0, .3, 1).normalize(), dirInit: false, live: false, rec: null, chunks: [], recT0: 0, recSec: 0, items: [], toast: '', toastT: 0, flash: 0 };
+const hudInfo = { l1: '', l2: '' };
+const mmss = n => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+function showToast(t) { cap.toast = t; cap.toastT = 2.8; capDirty = true; hudKey = ''; }
+function capSize(w, h) { if (cap.w === w && cap.h === h) return; cap.w = w; cap.h = h; cap.R.setSize(w, h, false); cap.cv.width = w; cap.cv.height = h; cap.cam.aspect = w / h; cap.cam.updateProjectionMatrix(); }
+function initCapture() {
+  if (cap.ok) return true;
+  try {
+    cap.gl = document.createElement('canvas'); cap.cv = document.createElement('canvas'); cap.g = cap.cv.getContext('2d');
+    cap.R = new THREE.WebGLRenderer({ canvas: cap.gl, antialias: true, preserveDrawingBuffer: true });
+    cap.R.outputColorSpace = THREE.SRGBColorSpace; cap.R.setPixelRatio(1);
+    cap.ok = true; capSize(640, 360);
+  } catch (e) { console.warn('Captura no disponible', e); cap.ok = false; showToast('Captura no disponible'); }
+  return cap.ok;
+}
+const _ct = new THREE.Vector3(), _cd = new THREE.Vector3();
+function updateCapCamera(dt, snap) {
+  const c = cap.cam;
+  if (st.capFrame === 'vista') { c.fov = 60; c.updateProjectionMatrix(); c.position.copy(head.pos); c.quaternion.copy(head.quat); c.updateMatrixWorld(true); return; }
+  const B = MD.box; _ct.set((B.x0 + B.x1) / 2, (B.y0 + B.y1) / 2, (B.z0 + B.z1) / 2); crystal.updateMatrixWorld(); crystal.localToWorld(_ct);
+  const Rr = .5 * Math.hypot(B.x1 - B.x0, B.y1 - B.y0, B.z1 - B.z0) * crystal.scale.x * 1.05 + .02;
+  c.fov = 45; c.updateProjectionMatrix();
+  const vf = c.fov * Math.PI / 360, hf = Math.atan(Math.tan(vf) * c.aspect), Dd = Rr / Math.sin(Math.min(vf, hf)); // encuadra todo el cristal
+  _cd.copy(head.pos).sub(_ct); if (_cd.lengthSq() < 1e-4) _cd.set(0, .3, 1);
+  _cd.normalize(); _cd.y = clamp(_cd.y, -.15, .75); _cd.normalize();   // sigue tu lado, con suavizado (sin temblor de cabeza)
+  if (snap || !cap.dirInit) { cap.dir.copy(_cd); cap.dirInit = true; } else cap.dir.lerp(_cd, 1 - Math.exp(-dt * 2.5)).normalize();
+  c.position.copy(_ct).addScaledVector(cap.dir, Dd); c.up.set(0, 1, 0); c.lookAt(_ct); c.updateMatrixWorld(true);
+}
+function capRender() {
+  const hide = [menu, slider, capPanel], vis = hide.map(o => o.visible); hide.forEach(o => { o.visible = false; });
+  const hs = allHands.map(h => [h.ctrl.visible, h.grip.visible, h.dot.visible]); allHands.forEach(h => { h.ctrl.visible = h.grip.visible = h.dot.visible = false; });
+  cap.R.render(scene, cap.cam);
+  hide.forEach((o, i) => { o.visible = vis[i]; }); allHands.forEach((h, i) => { h.ctrl.visible = hs[i][0]; h.grip.visible = hs[i][1]; h.dot.visible = hs[i][2]; });
+}
+function capCompose() { // imagen + rótulo (logo / nombre arriba, datos del defecto abajo)
+  const g = cap.g, w = cap.w, h = cap.h, k = h / 720;
+  g.drawImage(cap.gl, 0, 0, w, h);
+  g.fillStyle = 'rgba(10,14,28,.66)'; g.fillRect(0, h - 70 * k, w, 70 * k);
+  g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+  g.fillStyle = '#ffd34d'; g.font = `bold ${26 * k}px system-ui, sans-serif`; g.fillText(hudInfo.l1, 20 * k, h - 40 * k);
+  g.fillStyle = '#eef3ff'; fitText(g, hudInfo.l2, 20 * k, h - 14 * k, w - 40 * k, 20 * k);
+  let x = 18 * k;
+  if (logoOk) { const lh = 48 * k, lw = logoImg.width * lh / logoImg.height; g.drawImage(logoImg, x, 14 * k, lw, lh); x += lw + 10 * k; }
+  const wm = logoOk ? APP_NAME : APP_NAME + ' · UTN FRSN';
+  g.font = `bold ${24 * k}px system-ui, sans-serif`; g.lineWidth = 5 * k; g.lineJoin = 'round'; g.strokeStyle = 'rgba(10,14,28,.85)'; g.strokeText(wm, x, 42 * k); g.fillStyle = '#ffffff'; g.fillText(wm, x, 42 * k);
+}
+function captureTick(dt) {
+  if (cap.toastT > 0) { cap.toastT -= dt; if (cap.toastT <= 0) { cap.toast = ''; capDirty = true; hudKey = ''; } }
+  if (cap.flash > 0) { cap.flash = Math.max(0, cap.flash - dt * 2.5); capDirty = true; }
+  if (!(st.capPreview || cap.rec)) { if (cap.live) { cap.live = false; capDirty = true; } return; }
+  if (!initCapture()) { st.capPreview = false; return; }
+  cap.acc += dt;
+  if (cap.acc < (cap.rec ? 1 / 24 : 1 / 12)) return;
+  const adt = cap.acc; cap.acc = 0;
+  if (!cap.rec) capSize(640, 360);
+  updateCapCamera(adt); capRender(); capCompose(); cap.live = true; capDirty = true; cap.nf = (cap.nf || 0) + 1;
+  if (cap.rec) { const sec = Math.floor((performance.now() - cap.recT0) / 1000); if (sec !== cap.recSec) { cap.recSec = sec; hudKey = ''; } if (sec >= 300) stopRec(); }
+}
+function takePhoto() {
+  if (!initCapture()) return;
+  const pw = cap.w, ph = cap.h;
+  if (!cap.rec) capSize(1920, 1080);                 // en foto, 1080p (si se está grabando se mantiene el tamaño del video)
+  updateCapCamera(0, !cap.live); capRender(); capCompose();
+  cap.cv.toBlob(b => { if (b) addCapture('foto', b); }, 'image/png');
+  if (!cap.rec) capSize(pw, ph);
+  cap.flash = .85; sfx('shutter', { pan: 0 }); haptic('left', .6, 40); haptic('right', .6, 40);
+}
+function toggleRec() { if (cap.rec) stopRec(); else startRec(); }
+function startRec() {
+  if (cap.rec || !initCapture()) return;
+  if (typeof MediaRecorder === 'undefined') { showToast('Este navegador no graba video'); return; }
+  capSize(cap.vw, cap.vh); cap.dirInit = false; cap.acc = 0;
+  updateCapCamera(0, true); capRender(); capCompose();
+  let r;
+  try {
+    const stream = cap.cv.captureStream(24);
+    if (audio.dest) for (const t of audio.dest.stream.getAudioTracks()) stream.addTrack(t);
+    const mime = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm', 'video/mp4'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+    r = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 4000000 } : {});
+  } catch (e) { console.warn(e); showToast('No se pudo iniciar la grabación'); return; }
+  cap.chunks = []; r.ondataavailable = e => { if (e.data && e.data.size) cap.chunks.push(e.data); };
+  r.onstop = () => { const blob = new Blob(cap.chunks, { type: r.mimeType || 'video/webm' }); cap.chunks = []; if (blob.size) addCapture('video', blob); };
+  r.start(1000); cap.rec = r; cap.recT0 = performance.now(); cap.recSec = 0;
+  sfx('pop', { up: true }); haptic('left', .5, 60); capDirty = true; hudKey = '';
+}
+function stopRec() {
+  if (!cap.rec) return; const r = cap.rec; cap.rec = null;
+  try { r.stop(); } catch (e) { }
+  sfx('pop', { up: false }); haptic('left', .4, 40); capDirty = true; hudKey = '';
+}
+function downloadItem(it) { const a = document.createElement('a'); a.href = it.url; a.download = it.name; document.body.appendChild(a); a.click(); a.remove(); }
+function addCapture(kind, blob) {
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  const ts = `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`;
+  const ext = kind === 'foto' ? 'png' : (blob.type.includes('mp4') ? 'mp4' : 'webm');
+  const it = { kind, blob, url: URL.createObjectURL(blob), name: `cristalab_${L.corto}_${st.mode}_${ts}.${ext}` };
+  cap.items.push(it); while (cap.items.length > 12) URL.revokeObjectURL(cap.items.shift().url);
+  if (st.capAuto) { try { downloadItem(it); } catch (e) { } }
+  showToast(kind === 'foto' ? 'Foto guardada' : 'Video guardado');
+  if (!renderer.xr.isPresenting) galOpen = true; renderGallery();
+}
+// ---------- panel de cámara ----------
+function drawCap() {
+  const g = capG; capButtons = []; g.clearRect(0, 0, CW, CH);
+  rr(g, 0, 0, CW, CH, 26); g.fillStyle = 'rgba(16,21,34,.94)'; g.fill();
+  g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillStyle = '#ffd34d'; g.font = 'bold 30px system-ui, sans-serif'; g.fillText('CÁMARA', 28, 42);
+  g.textAlign = 'right'; g.font = '22px system-ui, sans-serif'; g.fillStyle = cap.rec ? '#ff5a5a' : '#8fa0c0';
+  g.fillText(cap.rec ? '● REC ' + mmss(cap.recSec) : st.capPreview ? 'vista previa' : 'apagada', CW - 28, 40);
+  const px = 24, py = 56, pw = CW - 48, ph = Math.round(pw * 9 / 16);
+  rr(g, px, py, pw, ph, 12); g.fillStyle = '#0b0f1a'; g.fill();
+  if (cap.live && cap.ok) { g.save(); rr(g, px, py, pw, ph, 12); g.clip(); g.drawImage(cap.cv, px, py, pw, ph); g.restore(); }
+  else { g.textAlign = 'center'; g.fillStyle = '#5e6779'; g.font = '24px system-ui, sans-serif'; g.fillText(st.capPreview ? 'iniciando cámara…' : 'Vista previa apagada', px + pw / 2, py + ph / 2); }
+  if (cap.flash > 0) { g.fillStyle = `rgba(255,255,255,${cap.flash})`; rr(g, px, py, pw, ph, 12); g.fill(); }
+  if (cap.rec) { g.fillStyle = '#ff3b3b'; g.beginPath(); g.arc(px + 30, py + 30, 11, 0, 7); g.fill(); }
+  g.strokeStyle = cap.rec ? '#ff5a5a' : '#46526e'; g.lineWidth = 3; rr(g, px, py, pw, ph, 12); g.stroke();
+  g.textAlign = 'left'; g.fillStyle = cap.toast ? '#9dffcf' : '#c9d4ea';
+  const last = cap.items[cap.items.length - 1];
+  fitText(g, cap.toast || (last ? 'Última: ' + last.name : 'X: foto · clic del stick izquierdo: video'), 28, py + ph + 32, CW - 56, 21);
+  const by = py + ph + 50, bw = 380, bw2 = CW - 48 - 16 - bw;
+  [
+    { id: 'cap:photo', label: 'Tomar foto (X)', en: true },
+    { id: 'cap:rec', label: cap.rec ? '■ Detener · ' + mmss(cap.recSec) : '● Grabar video', danger: !!cap.rec, en: true },
+    { id: 'cap:prev', label: 'Vista previa: ' + (st.capPreview ? 'sí' : 'no'), on: st.capPreview, en: true },
+    { id: 'cap:frame', label: 'Encuadre: ' + (st.capFrame === 'cristal' ? 'cristal' : 'mi vista'), en: true },
+    { id: 'cap:auto', label: 'Guardar al capturar: ' + (st.capAuto ? 'sí' : 'no'), on: st.capAuto, en: true },
+    { id: 'cap:dlall', label: `Descargar todo (${cap.items.length})`, en: cap.items.length > 0 },
+  ].forEach((b, i) => button(g, { ...b, small: true, x: 24 + (i % 2) * (bw + 16), y: by + Math.floor(i / 2) * 68, w: i % 2 ? bw2 : bw, h: 58 }, false, capButtons));
+  capTex.needsUpdate = true; capDirty = false;
+}
+function capHit(uv) { const x = uv.x * CW, y = (1 - uv.y) * CH; return capButtons.find(b => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h); }
+function capHoverAt(uv) { const b = capHit(uv); return b ? b.id : null; }
+function capClickAt(uv) {
+  const b = capHit(uv); if (!b || b.en === false) return;
+  switch (b.id) {
+    case 'cap:photo': takePhoto(); return;
+    case 'cap:rec': toggleRec(); return;
+    case 'cap:prev': st.capPreview = !st.capPreview; break;
+    case 'cap:frame': st.capFrame = st.capFrame === 'cristal' ? 'vista' : 'cristal'; cap.dirInit = false; break;
+    case 'cap:auto': st.capAuto = !st.capAuto; break;
+    case 'cap:dlall': cap.items.forEach((it, i) => setTimeout(() => downloadItem(it), i * 400)); break;
+  }
+  sfx('click', { pan: .6 }); capDirty = true;
+}
+// ---------- galería (HTML): se ve en la PC y al salir de VR ----------
+const galEl = document.getElementById('galeria'); let galOpen = false;
+function updateGalleryVis() { galEl.style.display = galOpen && cap.items.length && !document.pointerLockElement && !renderer.xr.isPresenting ? 'block' : 'none'; }
+function renderGallery() {
+  galEl.innerHTML = '';
+  const h = document.createElement('h2'); h.innerHTML = `<span>Capturas (${cap.items.length})</span>`;
+  const x = document.createElement('button'); x.textContent = '×'; x.onclick = () => { galOpen = false; updateGalleryVis(); }; h.appendChild(x); galEl.appendChild(h);
+  for (const it of cap.items.slice().reverse()) {
+    const row = document.createElement('div'); row.className = 'it';
+    const m = document.createElement(it.kind === 'foto' ? 'img' : 'video'); m.src = it.url; if (it.kind !== 'foto') { m.controls = true; m.muted = true; }
+    const a = document.createElement('a'); a.href = it.url; a.download = it.name; a.textContent = 'Descargar'; const n = document.createElement('div'); n.textContent = it.name;
+    const c = document.createElement('div'); c.appendChild(n); c.appendChild(a); row.appendChild(m); row.appendChild(c); galEl.appendChild(row);
+  }
+  const p = document.createElement('p'); p.textContent = 'Si dentro de las gafas no se descargaron solas, usá "Descargar".'; galEl.appendChild(p);
+  updateGalleryVis();
 }
 
 // ===================== BUCLE PRINCIPAL =====================
@@ -1638,6 +1834,8 @@ function loop(time) {
   if (menuDirty) drawMenu();
   if (sliderDirty && frame % 3 === 0) drawSlider();
   if (frame % 4 === 0) drawHUD();
+  captureTick(dt);
+  if (capDirty && (!cap.live || (cap.pAcc += dt) > .1)) { cap.pAcc = 0; drawCap(); }
 
   if (audio.ready) {
     const speed = MD.kind === 'disl' ? (MD.active && Math.abs(tau) > L.tauC ? 1 : 0) : MD.kind === 'twin' ? (Math.abs(tau) > L.tauT ? 1 : 0) : 0;
@@ -1648,7 +1846,7 @@ function loop(time) {
 
 buildModel(); updateMatrices(1); drawMenu(); drawSlider();
 renderer.setAnimationLoop(loop);
-window.__app = { info() { return PLANE ? PLANE.info + ' | cls:' + Array.from(PLN.slice(0, N)).reduce((o, v) => (o[v] = (o[v] || 0) + 1, o), {}) : null; }, act() { crystalAction(head.pos, head.fwd, 'right'); }, actionA, frenkel, counts() { let v = 0, it = 0, so = 0; for (let i = 0; i < N; i++) { if (HID[i]) v++; if (KIND[i] === 1 || KIND[i] === 4) it++; if (KIND[i] === 2 || KIND[i] === 3) so++; } return { N, v, it, so, sel: SEL, neigh: NEIGH.length }; }, menuCv, hudCv, sliderCv, view(y, p) { yaw = y; pitch = p; }, st, get N() { return N; }, setLattice, setMode, doMenu, crystal, camera, get MD() { return MD; } };
+window.__app = { cap, takePhoto, toggleRec, info() { return PLANE ? PLANE.info + ' | cls:' + Array.from(PLN.slice(0, N)).reduce((o, v) => (o[v] = (o[v] || 0) + 1, o), {}) : null; }, act() { crystalAction(head.pos, head.fwd, 'right'); }, actionA, frenkel, counts() { let v = 0, it = 0, so = 0; for (let i = 0; i < N; i++) { if (HID[i]) v++; if (KIND[i] === 1 || KIND[i] === 4) it++; if (KIND[i] === 2 || KIND[i] === 3) so++; } return { N, v, it, so, sel: SEL, neigh: NEIGH.length }; }, menuCv, hudCv, sliderCv, view(y, p) { yaw = y; pitch = p; }, st, get N() { return N; }, setLattice, setMode, doMenu, crystal, camera, get MD() { return MD; } };
 
 </script>
 </body>

@@ -24,12 +24,13 @@ Todo está en `index.html` (Three.js 0.169 desde jsDelivr). Sin build ni depende
 | Stick izquierdo / derecho ↔ | Girar la red |
 | A | Acción del defecto (salto de vacancia, salto intersticial, parciales, ángulo típico…) |
 | B | Reiniciar defecto |
-| X | Átomos reducidos / compactos |
+| X | Tomar foto |
+| Clic del stick izquierdo | Empezar / detener video |
 | Y | Recorrer los planos principales de la red (red perfecta, vacancia, intersticial, sustitucional) |
 
 ## Controles en PC
 
-Clic para capturar el mouse · Clic izq.: menú / átomos · Clic der. sostenido: agarrar la red · Rueda: escala · WASD: caminar · ↑↓: τ o θ · Q/E, ←/→, R/F: girar · Espacio: acción · B: reiniciar · Tab: siguiente defecto · 1-4: tipo de red · G: planos principales · T, I, O, P, C, F, E, J, H, M: opciones del menú · Z: resetear todo · Esc: salir.
+Clic para capturar el mouse · Clic izq.: menú / átomos · Clic der. sostenido: agarrar la red · Rueda: escala · WASD: caminar · ↑↓: τ o θ · Q/E, ←/→, R/F: girar · Espacio: acción · B: reiniciar · Tab: siguiente defecto · 1-4: tipo de red · G: planos principales · T, I, O, P, C, F, E, J, H, M: opciones del menú · Z: resetear todo · Esc: salir · K: foto · V: video.
 
 ## Menú
 
@@ -40,3 +41,12 @@ Encabezado con el nombre de la aplicación y el logo de la facultad; secciones *
 ## Logo
 
 Para incluir el logo, pegá la imagen como data URI en la constante `LOGO_URI` de `index.html`. Si queda vacía se muestra la sigla "UTN FRSN" como texto.
+
+## Cámara: foto y video
+
+Sobre la barra de esfuerzo hay un panel **CÁMARA** con vista previa en vivo, y los botones *Tomar foto*, *Grabar video*, *Vista previa*, *Encuadre*, *Guardar al capturar* y *Descargar todo*. También se maneja con los mandos (X = foto, clic del stick izquierdo = video) o con las teclas K y V en la PC.
+
+- Se filma con una cámara virtual (un segundo renderer fuera de pantalla), así que sale **sin menús ni mandos**, con el nombre de la app y una barra con los datos del defecto (red, defecto, τ, planos…).
+- **Encuadre "cristal"**: encuadra todo el cristal desde tu lado, con suavizado para que no tiemble con la cabeza. **"Mi vista"**: sale desde tu mirada.
+- Foto en PNG de 1920×1080; video en WebM de 1280×720 a 24 cuadros por segundo, con el sonido de la app (máximo 5 minutos).
+- Con *Guardar al capturar* activo, cada captura se descarga sola. Además quedan en una galería (se ve en la PC o al salir de VR) con el botón *Descargar*.
