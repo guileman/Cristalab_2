@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>Cristales VR — Redes y defectos cristalinos</title>
+<title>CristaLab — Redes y defectos cristalinos</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1322; font-family: system-ui, sans-serif; color: #e8eefc; }
   canvas { display: block; }
@@ -26,14 +26,14 @@
 </head>
 <body>
 <div id="info">
-  <h1>Cristales VR</h1>
-  Simulador de redes cristalinas (CS, BCC, FCC, HCP) y sus defectos: vacancias, intersticiales, sustitucionales, dislocaciones de borde y de tornillo, maclas y límites de grano.<br><br>
+  <h1>CristaLab</h1>
+  Simulador VR de la UTN FRSN: redes cristalinas (CS, BCC, FCC, HCP) y sus defectos: vacancias, intersticiales, sustitucionales, dislocaciones de borde y de tornillo, maclas y límites de grano.<br><br>
   <b>Con visor (Quest):</b> tocá <b>ENTER VR</b>.<br>
   <b>En PC:</b> hacé clic para mirar con el mouse (Esc suelta el puntero).<br>
   Clic izq.: botones del menú / átomos · Clic der. sostenido: agarrar la red · Rueda: escala<br>
   WASD: caminar · ↑ ↓: esfuerzo de corte τ (o ángulo θ) · Q/E, ←/→, R/F: girar la red<br>
   Espacio: acción (A) · B: reiniciar defecto · Tab: siguiente defecto · 1-4: tipo de red<br>
-  Z: resetear todo · T: tamaño de átomos · G: guías · I: sitios · O: tipo de sitio · P: parciales · C: carga cíclica · F: par de Frenkel · J: girar 90° · H: recentrar · M: sonido · 0: τ = 0
+  Z: resetear todo · T: tamaño de átomos · G: planos principales · I: sitios · O: tipo de sitio · P: parciales · C: carga cíclica · F: par de Frenkel · J: girar 90° · H: recentrar · M: sonido · 0: τ = 0
 </div>
 <div id="mira"></div>
 <script type="module">
@@ -180,7 +180,7 @@ function buildBlock(L, big) {
   const st = L.sites.tet.length ? genPoints(L, rows, origin, filter, rMax, L.sites.tet) : [];
   const sites = so.map(p => ({ p, t: 0 })).concat(st.map(p => ({ p, t: 1 })));
   const ext = boxOf(atoms);
-  return { atoms, sites, edges, inCell: inCell ? atoms.map(p => inCell(p[0], p[1], p[2])) : null, box: ext };
+  return { atoms, sites, edges, inCell: inCell ? atoms.map(p => inCell(p[0], p[1], p[2])) : null, box: ext, rows };
 }
 
 function boxOf(atoms) {
@@ -348,7 +348,7 @@ const modeName = id => MODES.find(m => m.id === id).nombre;
 
 const st = {
   lat: 'fcc', mode: 'edge', compact: false, showSites: false, siteType: 0, partials: false,
-  cyclic: false, sound: true, guides: true, bonds: false,
+  cyclic: false, sound: true, guides: true, bonds: false, plane: 0, help: false,
   sliderTau: 0, stickTau: 0, keyTau: 0, tau: 0, gbAngle: 8, time: 0,
 };
 let L = LAT[st.lat];
@@ -358,6 +358,8 @@ const REF = new Float32Array(MAX * 3), CUR = new Float32Array(MAX * 3), TGT = ne
 const SHUF = new Float32Array(MAX * 3);
 const KIND = new Uint8Array(MAX), HID = new Uint8Array(MAX), GRP = new Uint8Array(MAX), INCELL = new Uint8Array(MAX);
 const SITEOF = new Int16Array(MAX);
+const PLN = new Uint8Array(MAX).fill(255), PLC = new Uint8Array(MAX); // clase de apilamiento (A,B,C…) y plano central resaltado
+let PLANE = null;            // plano principal seleccionado (info para el HUD y las guías)
 const SITES = new Float32Array(MAXS * 3), SITET = new Uint8Array(MAXS), SITEOCC = new Int16Array(MAXS);
 let N = 0, NS = 0;
 let MD = null;               // metadatos del modelo actual
@@ -554,7 +556,8 @@ function quad(color, opacity) {
   m.renderOrder = 20; return m;
 }
 const slipQuad = quad(0x66ccff, .16), twinQuad0 = quad(0x6dffb0, .18), twinQuad1 = quad(0x6dffb0, .28), gbQuad = quad(0xffa64d, .18);
-crystal.add(slipQuad, twinQuad0, twinQuad1, gbQuad);
+const planeQuad = quad(0xffd34d, .2);
+crystal.add(slipQuad, twinQuad0, twinQuad1, gbQuad, planeQuad);
 function placeHQuad(q, y, b, dx = 0) { q.rotation.set(-Math.PI / 2, 0, 0); q.position.set((b.x0 + b.x1) / 2 + dx, y, (b.z0 + b.z1) / 2); q.scale.set(b.x1 - b.x0 + 2 * L.nn, b.z1 - b.z0 + 2 * L.nn, 1); }
 
 // ---------- sprites indicadores (pool) ----------
@@ -590,10 +593,14 @@ function useSprite(tex, lx, ly, lz, size, aspect) {
 
 
 // ===================== MENÚ FIJO AL MUNDO =====================
-const MW = 1024, MH = 1470;
+const MW = 1024, MH = 1640;
+const APP_NAME = 'CristaLab';
+const LOGO_URI = '';          // logo UTN FRSN en data URI (PNG/JPG/SVG en base64); vacío = marca de texto
+const logoImg = new Image(); let logoOk = false;
+if (LOGO_URI) { logoImg.onload = () => { logoOk = true; menuDirty = true; }; logoImg.src = LOGO_URI; }
 const menuCv = mkCanvas(MW, MH), menuG = menuCv.getContext('2d'), menuTex = canvasTex(menuCv);
 const menu = new THREE.Mesh(new THREE.PlaneGeometry(.72, .72 * MH / MW), new THREE.MeshBasicMaterial({ map: menuTex, fog: false, transparent: true }));
-menu.position.set(-0.98, 1.29, -0.72); menu.lookAt(0, 1.55, 0); station.add(menu);
+menu.position.set(-0.98, 1.25, -0.72); menu.lookAt(0, 1.55, 0); station.add(menu);
 { // marco y patas del atril
   const fr = new THREE.Mesh(new THREE.BoxGeometry(.76, .76 * MH / MW + .04, .02), new THREE.MeshLambertMaterial({ color: 0x2a3140, flatShading: true }));
   fr.position.set(0, 0, -.012); menu.add(fr);
@@ -627,8 +634,12 @@ const TXT = {
     fcc: 'Cúbica centrada en las caras (FCC): 4 átomos/celda, NC = 12, FEA = 0,74, a = 2R√2. Cu, Al, Ni, Ag, Au, Fe-γ. Apilamiento ABCABC de planos {111}; 12 sistemas {111}<110> con tensión crítica baja → muy dúctil.',
     hcp: 'Hexagonal compacta (HCP): 6 átomos por celda hexagonal, NC = 12, FEA = 0,74, c/a ideal 1,633. Mg, Zn, Ti-α, Co, Zr. Apilamiento ABAB; desliza sobre todo en el plano basal (0001)<11-20> (solo 3 sistemas): por eso macla con facilidad.'
   },
+  help: {
+    vr: 'Gatillo: botones del menú, barra de τ (mantenelo apretado y deslizá) y elegir átomos.\nAgarre (lateral): agarrar y mover la red; con las dos manos a la vez: girar y escalar.\nStick derecho ↑↓: esfuerzo de corte τ (o el ángulo θ en límite de grano).\nStick izquierdo: girar la red (un eje por vez).\nA (derecho): acción del defecto · B (derecho): reiniciar el defecto.\nX (izquierdo): átomos reducidos / compactos · Y (izquierdo): planos principales.\nEn SISTEMA: recentrar la red, resetear todo, sonido y salir de VR.',
+    pc: 'Clic: botones del menú, barra de τ y elegir átomos · Clic derecho sostenido: agarrar la red · Rueda: escala.\nWASD: caminar · ↑↓: esfuerzo de corte τ (o ángulo θ) · Q/E, ←/→, R/F: girar la red.\nEspacio: acción del defecto · B: reiniciar el defecto · Tab: siguiente defecto · 1-4: tipo de red.\nG: planos principales · T: tamaño de átomos · I/O: sitios · P: parciales · C: carga cíclica · F: par de Frenkel · E: enlaces.\nJ: girar 90° · H: recentrar · Z: resetear todo · M: sonido · Esc: salir.'
+  },
   mode: {
-    perfect: 'Con "Enlaces" ves las uniones a primeros vecinos (en los metales el enlace es metálico: iones positivos en un mar de electrones); su color indica si están comprimidos (azul) o estirados (rojo). Las líneas blancas marcan la celda unidad (los átomos de la celda se ven más claros). Apuntá a un átomo y apretá el gatillo para ver sus primeros vecinos y el número de coordinación. Con "Sitios" ves los huecos octaédricos (celeste) o tetraédricos (violeta).',
+    perfect: 'Con "Enlaces" ves las uniones a primeros vecinos (en los metales el enlace es metálico: iones positivos en un mar de electrones); su color indica si están comprimidos (azul) o estirados (rojo). Las líneas blancas marcan la celda unidad (los átomos de la celda se ven más claros). Con "Planos principales" recorrés los planos más importantes de la red: se marca el plano que pasa por el centro y las capas se colorean según su apilamiento (A, B, C…), con su distancia interplanar y densidad plana. Apuntá a un átomo y apretá el gatillo para ver sus primeros vecinos y el número de coordinación. Con "Sitios" ves los huecos octaédricos (celeste) o tetraédricos (violeta).',
     vac: 'Vacancia: sitio de red vacío (marcado en rojo). Su concentración de equilibrio crece con T: Nv = N·exp(−Qv/kT). Los vecinos se relajan hacia el hueco. Gatillo sobre un átomo: lo sacás (o lo devolvés si apuntás al hueco). A: un vecino salta al hueco → así difunden los átomos sustitucionales. Par de Frenkel: un átomo se va a un intersticio y deja su vacancia.',
     int: 'Intersticial: átomo chico (C, N, H, B) alojado en un hueco de la red. Gatillo: agregar en el sitio apuntado o quitar. A: salto a un sitio vecino (difusión intersticial, mucho más rápida que la sustitucional). El C entra en el hueco octaédrico; el del Fe-γ (FCC) es más grande que el del Fe-α (BCC): por eso la austenita disuelve hasta 2,11 % C y la ferrita solo 0,022 %. Fijate la distorsión tetragonal en BCC.',
     sub: 'Sustitucional: el soluto reemplaza a un átomo del solvente (Zn en Cu = latón, Ni en Cu). Reglas de Hume-Rothery para solubilidad amplia: ΔR < 15 %, misma estructura, electronegatividad y valencia parecidas. Gatillo sobre un átomo: soluto grande (azul, comprime alrededor) → chico (verde, tracciona) → solvente. Estos campos de tensión traban dislocaciones: endurecimiento por solución sólida.',
@@ -645,6 +656,7 @@ function optButtons() {
   const aLbl = { perfect: '—', vac: 'Salto de vacancia (A)', int: 'Salto intersticial (A)', sub: 'Agregar soluto (A)', edge: L.id === 'fcc' ? 'Parciales (A)' : '—', screw: L.id === 'fcc' ? 'Parciales (A)' : '—', twin: '—', gb: 'Ángulo típico (A)' }[m];
   return [
     { id: 'size', label: 'Átomos: ' + (st.compact ? 'compactos' : 'reducidos'), on: st.compact, en: true },
+    { id: 'plane', label: st.plane > 0 && pt ? 'Plano: ' + PLANES[L.id][st.plane - 1].n : 'Planos principales', on: st.plane > 0 && pt, en: pt },
     { id: 'sites', label: 'Sitios intersticiales', on: st.showSites, en: pt },
     { id: 'stype', label: 'Sitio: ' + L.nombreSitio[st.siteType], on: false, en: pt && L.sites.tet.length > 0 },
     { id: 'partials', label: 'Parciales de Shockley', on: st.partials, en: L.id === 'fcc' && (m === 'edge' || m === 'screw') },
@@ -652,14 +664,26 @@ function optButtons() {
     { id: 'frenkel', label: 'Par de Frenkel', on: false, en: m === 'vac' || m === 'int' },
     { id: 'action', label: aLbl, on: false, en: aLbl !== '—' },
     { id: 'reset', label: 'Reiniciar defecto (B)', on: false, en: true },
-    { id: 'center', label: 'Recentrar red', on: false, en: true },
-    { id: 'sound', label: 'Sonido: ' + (st.sound ? 'sí' : 'no'), on: st.sound, en: true },
-    { id: 'guides', label: 'Guías y planos', on: st.guides, en: true },
     { id: 'rot', label: 'Girar 90°', on: false, en: true },
-    { id: 'resetall', label: 'Resetear todo', on: false, en: true },
-    { id: 'exit', label: renderer.xr.isPresenting ? 'Salir de VR' : 'Salir (soltar mouse)', on: false, en: true, danger: true },
     { id: 'bonds', label: 'Enlaces: ' + (st.bonds ? 'visibles' : 'ocultos'), on: st.bonds, en: true },
   ];
+}
+
+function sysButtons() {
+  return [
+    { id: 'center', label: 'Recentrar red', on: false, en: true },
+    { id: 'resetall', label: 'Resetear todo', on: false, en: true },
+    { id: 'help', label: 'Controles', on: st.help, en: true },
+    { id: 'sound', label: 'Sonido: ' + (st.sound ? 'sí' : 'no'), on: st.sound, en: true },
+    { id: 'exit', label: renderer.xr.isPresenting ? 'SALIR DE VR' : 'SALIR (soltar mouse)', on: false, en: true, danger: true },
+  ];
+}
+function drawLogo(g, x, y, w, h) {
+  if (logoOk) { const r = Math.min(w / logoImg.width, h / logoImg.height), iw = logoImg.width * r, ih = logoImg.height * r; g.drawImage(logoImg, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih); return; }
+  // sin archivo de logo: marca de texto con la sigla de la facultad
+  rr(g, x, y, w, h, 14); g.fillStyle = '#1b2233'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#ffd34d'; g.stroke();
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#ffd34d'; g.font = 'bold 44px system-ui, sans-serif'; g.fillText('UTN', x + w / 2, y + h * .36);
+  g.fillStyle = '#eef3ff'; g.font = 'bold 30px system-ui, sans-serif'; g.fillText('FRSN', x + w / 2, y + h * .72);
 }
 
 function button(g, b, big) {
@@ -680,24 +704,38 @@ function drawMenu() {
   g.clearRect(0, 0, MW, MH);
   rr(g, 0, 0, MW, MH, 30); g.fillStyle = 'rgba(16,21,34,.94)'; g.fill();
   g.textAlign = 'left'; g.textBaseline = 'alphabetic';
-  g.fillStyle = '#ffd34d'; g.font = 'bold 50px system-ui, sans-serif'; g.fillText('CRISTALES VR', 30, 66);
-  g.fillStyle = '#9fb0cf'; g.font = '24px system-ui, sans-serif'; g.textAlign = 'right'; g.fillText('Redes cristalinas y defectos · Metalurgia', MW - 30, 64); g.textAlign = 'left';
+  drawLogo(g, 24, 16, 176, 100);
+  g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+  g.fillStyle = '#ffd34d'; g.font = 'bold 58px system-ui, sans-serif'; g.fillText(APP_NAME, 224, 66);
+  g.fillStyle = '#c9d4ea'; g.font = '23px system-ui, sans-serif'; g.fillText('Redes cristalinas y defectos · Metalurgia', 224, 96);
+  g.fillStyle = '#8fa0c0'; g.font = '19px system-ui, sans-serif'; g.fillText('UTN · Facultad Regional San Nicolás', 224, 121);
   const sec = (t, y) => { g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillStyle = '#7f93b8'; g.font = 'bold 22px system-ui, sans-serif'; g.fillText(t, 30, y); };
-  sec('RED CRISTALINA', 118);
-  ['sc', 'bcc', 'fcc', 'hcp'].forEach((k, i) => button(g, { id: 'lat:' + k, label: LAT[k].corto, sub: LAT[k].nombre.replace('Cúbica centrada en', 'C. centrada en'), x: 24 + i * 248, y: 132, w: 234, h: 100, on: st.lat === k }, true));
-  sec('DEFECTO', 268);
-  MODES.forEach((m, i) => button(g, { id: 'mode:' + m.id, label: m.nombre, x: 24 + (i % 2) * 492, y: 284 + Math.floor(i / 2) * 82, w: 480, h: 70, on: st.mode === m.id }));
-  sec('OPCIONES', 630);
-  optButtons().forEach((o, i) => button(g, { ...o, small: true, x: 24 + (i % 3) * 330, y: 646 + Math.floor(i / 3) * 70, w: 316, h: 60 }));
-  sec('INFORMACIÓN', 1015);
-  rr(g, 24, 1030, MW - 48, MH - 1054, 16); g.fillStyle = '#1b2233'; g.fill();
+  sec('RED CRISTALINA', 158);
+  ['sc', 'bcc', 'fcc', 'hcp'].forEach((k, i) => button(g, { id: 'lat:' + k, label: LAT[k].corto, sub: LAT[k].nombre.replace('Cúbica centrada en', 'C. centrada en'), x: 24 + i * 248, y: 170, w: 234, h: 100, on: st.lat === k }, true));
+  sec('DEFECTO', 306);
+  MODES.forEach((m, i) => button(g, { id: 'mode:' + m.id, label: m.nombre, x: 24 + (i % 2) * 492, y: 320 + Math.floor(i / 2) * 78, w: 480, h: 68, on: st.mode === m.id }));
+  sec('OPCIONES', 654);
+  optButtons().forEach((o, i) => button(g, { ...o, small: true, x: 24 + (i % 3) * 330, y: 668 + Math.floor(i / 3) * 68, w: 316, h: 58 }));
+  // sección aparte: sistema (con la salida)
+  g.fillStyle = '#34405c'; g.fillRect(24, 946, MW - 48, 2);
+  sec('SISTEMA', 978);
+  const sb = sysButtons();
+  sb.slice(0, 3).forEach((o, i) => button(g, { ...o, small: true, x: 24 + i * 330, y: 992, w: 316, h: 58 }));
+  button(g, { ...sb[3], small: true, x: 24, y: 1060, w: 316, h: 58 });
+  button(g, { ...sb[4], small: false, x: 354, y: 1060, w: MW - 378, h: 58 });
+  sec('INFORMACIÓN', 1150);
+  rr(g, 24, 1164, MW - 48, MH - 1188, 16); g.fillStyle = '#1b2233'; g.fill();
   g.textAlign = 'left'; g.textBaseline = 'alphabetic';
   g.fillStyle = '#ffd34d'; g.font = 'bold 26px system-ui, sans-serif';
-  g.fillText(`${L.corto} · ${modeName(st.mode)}  —  ej.: ${L.ej}`, 44, 1068);
-  g.font = '22px system-ui, sans-serif'; g.fillStyle = '#c9d4ea';
-  let y = wrap(g, TXT.lat[st.lat], 44, 1102, MW - 88, 28, MH - 40);
-  g.fillStyle = '#eef3ff';
-  wrap(g, TXT.mode[st.mode], 44, y + 10, MW - 88, 28, MH - 34);
+  g.fillText(st.help ? 'Controles' : `${L.corto} · ${modeName(st.mode)}  —  ej.: ${L.ej}`, 44, 1202);
+  g.font = '22px system-ui, sans-serif';
+  if (st.help) { g.fillStyle = '#eef3ff'; wrap(g, renderer.xr.isPresenting ? TXT.help.vr : TXT.help.pc, 44, 1238, MW - 88, 28, MH - 34); }
+  else {
+    g.fillStyle = '#c9d4ea';
+    const y = wrap(g, TXT.lat[st.lat], 44, 1238, MW - 88, 28, MH - 40);
+    g.fillStyle = '#eef3ff';
+    wrap(g, TXT.mode[st.mode], 44, y + 10, MW - 88, 28, MH - 34);
+  }
   menuTex.needsUpdate = true; menuDirty = false;
 }
 
@@ -736,7 +774,7 @@ function setAtoms(list) {
   N = Math.min(list.length, MAX);
   for (let i = 0; i < N; i++) {
     const p = list[i]; REF[i * 3] = p[0]; REF[i * 3 + 1] = p[1]; REF[i * 3 + 2] = p[2];
-    KIND[i] = 0; HID[i] = 0; GRP[i] = 0; INCELL[i] = 0; SITEOF[i] = -1;
+    KIND[i] = 0; HID[i] = 0; GRP[i] = 0; INCELL[i] = 0; SITEOF[i] = -1; PLN[i] = 255; PLC[i] = 0;
   }
   CUR.set(REF.subarray(0, N * 3)); TGT.set(REF.subarray(0, N * 3));
 }
@@ -752,7 +790,7 @@ function buildModel(quiet) {
     if (d.inCell) for (let i = 0; i < N; i++) INCELL[i] = d.inCell[i] ? 1 : 0;
     NS = Math.min(d.sites.length, MAXS);
     for (let i = 0; i < NS; i++) { const s = d.sites[i]; SITES.set(s.p, i * 3); SITET[i] = s.t; SITEOCC[i] = -1; }
-    MD = { kind: 'block', box: d.box, edges: d.edges };
+    MD = { kind: 'block', box: d.box, edges: d.edges, rows: d.rows };
     if (m === 'vac') { HID[nearestAtom(0, 0, 0)] = 1; }
     if (m === 'int') { const s = nearestSite(0, 0, 0, L.sites.tet.length ? st.siteType : 0); if (s >= 0) addInterstitial(s, 1); }
     if (m === 'sub') {
@@ -776,13 +814,14 @@ function buildModel(quiet) {
     for (let i = 0; i < N; i++) GRP[i] = d.grain[i];
     MD = { kind: 'gb', ...d, built: st.gbAngle };
   }
+  PLANE = null; if (MD.kind === 'block') computePlane();
   buildGuides();
   posDirty = colDirty = true; sliderDirty = true; if (!quiet) menuDirty = true;
 }
 
 function buildGuides() {
   setLines(cellLines, []); setLines(neighLines, []); setLines(coreLines, []); setLines(arrowLines, []);
-  slipQuad.visible = twinQuad0.visible = twinQuad1.visible = gbQuad.visible = false;
+  slipQuad.visible = twinQuad0.visible = twinQuad1.visible = gbQuad.visible = planeQuad.visible = false;
   if (MD.kind === 'block' && st.mode === 'perfect' && MD.edges) setLines(cellLines, MD.edges.flatMap(e => [...e[0], ...e[1]]));
   if (MD.kind === 'disl') { placeHQuad(slipQuad, 0, MD.box); }
   if (MD.kind === 'twin') { placeHQuad(twinQuad0, 0, MD.box); placeHQuad(twinQuad1, 0, MD.box); }
@@ -795,7 +834,7 @@ function nearestSite(x, y, z, type, free = true) { let b = -1, bd = 1e9; for (le
 function addInterstitial(site, kind, fromX) {
   if (N >= MAX || SITEOCC[site] >= 0) return -1;
   const i = N++; REF.set(SITES.subarray(site * 3, site * 3 + 3), i * 3);
-  KIND[i] = kind; HID[i] = 0; GRP[i] = 0; INCELL[i] = 0; SITEOF[i] = site; SITEOCC[site] = i;
+  KIND[i] = kind; HID[i] = 0; GRP[i] = 0; INCELL[i] = 0; SITEOF[i] = site; SITEOCC[site] = i; PLN[i] = 255; PLC[i] = 0;
   if (fromX) { CUR.set(fromX, i * 3); JUMP = { i, from: fromX.slice(), to: [...REF.subarray(i * 3, i * 3 + 3)], t: 0, dur: .55 }; }
   else CUR.set(REF.subarray(i * 3, i * 3 + 3), i * 3);
   TGT.set(REF.subarray(i * 3, i * 3 + 3), i * 3);
@@ -806,7 +845,7 @@ function removeAtom(i) { // borrado por swap-remove
   const last = --N;
   if (i !== last) {
     for (const A of [REF, CUR, TGT, SHUF]) { A[i * 3] = A[last * 3]; A[i * 3 + 1] = A[last * 3 + 1]; A[i * 3 + 2] = A[last * 3 + 2]; }
-    KIND[i] = KIND[last]; HID[i] = HID[last]; GRP[i] = GRP[last]; INCELL[i] = INCELL[last]; SITEOF[i] = SITEOF[last];
+    KIND[i] = KIND[last]; HID[i] = HID[last]; GRP[i] = GRP[last]; INCELL[i] = INCELL[last]; SITEOF[i] = SITEOF[last]; PLN[i] = PLN[last]; PLC[i] = PLC[last];
     if (SITEOF[i] >= 0) SITEOCC[SITEOF[i]] = i;
     if (SEL === last) SEL = i;
   }
@@ -837,6 +876,91 @@ function relax() { // campo de relajación ~1/r² alrededor de cada defecto punt
     TGT[i * 3] = x + ux; TGT[i * 3 + 1] = y + uy; TGT[i * 3 + 2] = z + uz;
   }
   relaxDirty = false; posDirty = true;
+}
+
+// ===================== PLANOS PRINCIPALES =====================
+const PLANES = {
+  sc: [{ hkl: [1, 0, 0], n: '(100)' }, { hkl: [1, 1, 0], n: '(110)' }, { hkl: [1, 1, 1], n: '(111)' }],
+  bcc: [{ hkl: [1, 1, 0], n: '(110)' }, { hkl: [1, 0, 0], n: '(100)' }, { hkl: [1, 1, 1], n: '(111)' }],
+  fcc: [{ hkl: [1, 1, 1], n: '(111)' }, { hkl: [1, 0, 0], n: '(100)' }, { hkl: [1, 1, 0], n: '(110)' }],
+  hcp: [{ hkl: [0, 0, 1], n: '(0001)', t: 'basal' }, { hkl: [1, 0, 0], n: '(10-10)', t: 'prismático' }, { hkl: [1, 0, 1], n: '(10-11)', t: 'piramidal' }]
+};
+const planeName = pd => pd.n + (pd.t ? ' ' + pd.t : '');
+const fmt = (v, k = 2) => v.toFixed(k).replace('.', ',');
+// Analiza una familia de planos sobre los átomos de red actuales. Si assign, marca la clase de apilamiento de cada átomo.
+function planeG(hkl) { // vector de la red recíproca (sin 2π): |G| = 1/d_hkl
+  const [a1, a2, a3] = L.cell, V = vdot(a1, vcross(a2, a3));
+  const b1 = vsc(vcross(a2, a3), 1 / V), b2 = vsc(vcross(a3, a1), 1 / V), b3 = vsc(vcross(a1, a2), 1 / V);
+  return vadd(vadd(vsc(b1, hkl[0]), vsc(b2, hkl[1])), vsc(b3, hkl[2]));
+}
+function analyzePlane(pd, assign) {
+  const G = planeG(pd.hkl), dh = 1 / vlen(G), nc = vnorm(G), R = MD.rows, n = [vdot(R[0], nc), vdot(R[1], nc), vdot(R[2], nc)];
+  let c = -1, bd = 1e9;
+  for (let i = 0; i < N; i++) if (SITEOF[i] < 0) { const r = REF[i * 3] ** 2 + REF[i * 3 + 1] ** 2 + REF[i * 3 + 2] ** 2; if (r < bd - 1e-9) { bd = r; c = i; } }
+  if (c < 0) return null;
+  const pc = n[0] * REF[c * 3] + n[1] * REF[c * 3 + 1] + n[2] * REF[c * 3 + 2], ts = [];
+  for (let i = 0; i < N; i++) if (SITEOF[i] < 0) ts.push(n[0] * REF[i * 3] + n[1] * REF[i * 3 + 1] + n[2] * REF[i * 3 + 2] - pc);
+  const srt = ts.slice().sort((a, b) => a - b), u = [];
+  for (const t of srt) if (!u.length || t - u[u.length - 1] > 1e-3) u.push(t);
+  const K = u.length;
+  const idC = u.findIndex(t => Math.abs(t) < 1e-3);
+  // período de apilamiento: menor traslación de red paralela a la normal → nº de capas distintas por período
+  let P = 1e9;
+  for (let j = 0; j < N; j++) {
+    if (SITEOF[j] >= 0 || j === c) continue;
+    const vx = REF[j * 3] - REF[c * 3], vy = REF[j * 3 + 1] - REF[c * 3 + 1], vz = REF[j * 3 + 2] - REF[c * 3 + 2], al = vx * n[0] + vy * n[1] + vz * n[2];
+    if (al > 1e-3 && al < P && Math.hypot(vx - al * n[0], vy - al * n[1], vz - al * n[2]) < 1e-3) P = al;
+  }
+  let m = 0; if (P < 1e8) for (const t of u) if (t > -1e-3 && t < P - 1e-3) m++;
+  const nv = L.basis.length / Math.abs(vdot(L.cell[0], vcross(L.cell[1], L.cell[2])));
+  // espaciado medio entre capas atómicas: d_hkl de la celda / nº de capas distintas que aportan los átomos de la base
+  const offs = [];
+  for (const b of L.basis) {
+    let r = vdot(nc, fracToCart(L, b)) % dh; if (r < 0) r += dh; if (r > dh - 1e-4) r = 0;
+    if (!offs.some(o => Math.abs(o - r) < 1e-4)) offs.push(r);
+  }
+  const dbar = dh / offs.length;
+  const out = { n, c, m, dbar, sigma: dbar * nv, P };
+  if (assign) {
+    let k = 0;
+    for (let i = 0; i < N; i++) {
+      if (SITEOF[i] >= 0) { PLN[i] = 255; PLC[i] = 0; continue; }
+      const t = ts[k++]; let id = 0, bt = 1e9;
+      for (let q = 0; q < K; q++) { const dd = Math.abs(t - u[q]); if (dd < bt) { bt = dd; id = q; } }
+      PLC[i] = id === idC ? 1 : 0;
+      PLN[i] = m > 0 ? (((id - idC) % m) + m) % m : 255;
+    }
+  }
+  return out;
+}
+function computePlane() {
+  PLANE = null; PLN.fill(255, 0, N); PLC.fill(0, 0, N);
+  if (MD.kind !== 'block' || st.plane <= 0) return;
+  const defs = PLANES[L.id], pd = defs[st.plane - 1];
+  const all = defs.map(d => analyzePlane(d, false)), me = analyzePlane(pd, true);
+  if (!me || all.some(a => !a)) return;
+  const smax = Math.max(...all.map(a => a.sigma)), compact = me.sigma >= smax - 1e-6;
+  const letters = 'ABCDEF'; let seq = '';
+  if (me.m > 0 && me.m <= 6) for (let i = 0; i < Math.max(4, me.m * 2); i++) seq += letters[i % me.m];
+  const apil = me.m === 1 ? 'todos los planos iguales (A A A…)' : seq ? 'apilamiento ' + seq + '…' : 'apilamiento de período largo (sin colorear)';
+  const B = MD.box, S = ((B.x1 - B.x0) + (B.y1 - B.y0) + (B.z1 - B.z0)) / 3 * 1.2;
+  const pos = [REF[me.c * 3], REF[me.c * 3 + 1], REF[me.c * 3 + 2]], nn_ = me.n;
+  planeQuad.position.set(pos[0], pos[1], pos[2]); planeQuad.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(nn_[0], nn_[1], nn_[2]));
+  planeQuad.scale.set(S, S, 1);
+  // vector contenido en el plano (n × ŷ, o n × x̂ si la normal es vertical) para ubicar la etiqueta en su borde
+  let ux = nn_[2], uy = 0, uz = -nn_[0];
+  if (Math.hypot(ux, uz) < .2) { ux = 0; uy = nn_[2]; uz = -nn_[1]; }
+  const ul = Math.hypot(ux, uy, uz) || 1;
+  PLANE = {
+    pd, me, lx: pos[0] + ux / ul * S * .5, ly: pos[1] + uy / ul * S * .5 + .05 * L.nn, lz: pos[2] + uz / ul * S * .5,
+    label: pd.n + (me.m > 1 && me.m <= 6 ? ' · ' + letters.slice(0, me.m) : ''),
+    info: `Plano ${planeName(pd)} · ${apil} · d = ${fmt(me.dbar, 3)} a · densidad plana = ${fmt(me.sigma)} át/a²${compact ? ' · plano más compacto' : ''}`
+  };
+}
+function cyclePlane() {
+  if (MD.kind !== 'block') return;
+  st.plane = (st.plane + 1) % (PLANES[L.id].length + 1);
+  computePlane(); colDirty = menuDirty = true; sfx('click');
 }
 
 // ===================== SIMULACIÓN POR MODO =====================
@@ -931,7 +1055,7 @@ function simGB(dt) {
 }
 
 // ===================== COLORES Y MATRICES =====================
-const HALF = new THREE.Color(0x1fe0c0), YEL = new THREE.Color(0xffd34d), MAG = new THREE.Color(0xd65ae0), GRN = new THREE.Color(0x58e0a0), BLU = new THREE.Color(0x6aa8ff), RED = new THREE.Color(0xff5a5a), NEI = new THREE.Color(0xffe066);
+const STACKC = [null, new THREE.Color(0x59b8ff), new THREE.Color(0xff7ad9), new THREE.Color(0xa6e35a), new THREE.Color(0xffb04d), new THREE.Color(0xb59bff)], WHITE = new THREE.Color(0xffffff), HALF = new THREE.Color(0x1fe0c0), YEL = new THREE.Color(0xffd34d), MAG = new THREE.Color(0xd65ae0), GRN = new THREE.Color(0x58e0a0), BLU = new THREE.Color(0x6aa8ff), RED = new THREE.Color(0xff5a5a), NEI = new THREE.Color(0xffe066);
 const kc = {}; for (const k in KCOL) kc[k] = new THREE.Color(KCOL[k]);
 function updateColors() {
   const a = atoms.instanceColor.array, m = st.mode, nn = L.nn;
@@ -939,6 +1063,7 @@ function updateColors() {
   for (let i = 0; i < N; i++) {
     tmpC.copy(KIND[i] ? kc[KIND[i]] : BASECOL);
     if (KIND[i] === 4) tmpC.copy(BASECOL).lerp(YEL, .45);
+    if (PLN[i] !== 255 && KIND[i] === 0) { const sc = STACKC[PLN[i]]; if (sc) tmpC.lerp(sc, .6); if (PLC[i]) tmpC.lerp(WHITE, .4); }
     const y = REF[i * 3 + 1];
     if (m === 'perfect' && MD.edges && MD.edges.length && !INCELL[i]) tmpC.multiplyScalar(.55);
     if (D) {
@@ -1030,6 +1155,8 @@ function updateGuides() {
     setLines(arrowLines, arr);
     if (show && D.S !== 0) useSprite(textTex(`escalón: ${D.S > 0 ? '+' : ''}${D.S}·b`, '#9cd0ff'), D.box.x1, D.box.y1 + .7 * nn, 0, .03, 4);
   } else { setLines(coreLines, []); setLines(arrowLines, []); }
+  planeQuad.visible = !!PLANE && MD.kind === 'block';
+  if (planeQuad.visible) useSprite(textTex(PLANE.label, '#ffe9a0'), PLANE.lx, PLANE.ly, PLANE.lz, .032, 4);
   if (MD.kind === 'twin' && show) {
     twinQuad1.position.y = MD.yd || 0; twinQuad1.position.x = (MD.box.x0 + MD.box.x1) / 2 + MD.sY[0] * (MD.yd || 0);
     useSprite(textTex('plano de macla ' + L.twin.label, '#9dffcf'), MD.box.x1 + .5 * nn, 0, MD.box.z1, .03, 4);
@@ -1281,7 +1408,8 @@ function doMenu(id) {
     case 'resetall': resetAll(); break;
     case 'exit': exitApp(); break;
     case 'sound': st.sound = !st.sound; break;
-    case 'guides': st.guides = !st.guides; break;
+    case 'plane': cyclePlane(); break;
+    case 'help': st.help = !st.help; break;
     case 'bonds': st.bonds = !st.bonds; bondTimer = 0; break;
     case 'rot': crystal.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), Math.PI / 2); break;
   }
@@ -1299,7 +1427,7 @@ function actionA() {
     const from = [CUR[j * 3], CUR[j * 3 + 1], CUR[j * 3 + 2]];
     for (let c = 0; c < 3; c++) { const t = REF[j * 3 + c]; REF[j * 3 + c] = REF[v * 3 + c]; REF[v * 3 + c] = t; }
     JUMP = { i: j, from, to: [REF[j * 3], REF[j * 3 + 1], REF[j * 3 + 2]], t: 0, dur: .55 };
-    if (SEL === j) SEL = -1; relaxDirty = true; sfx('jump'); haptic('right', .3, 40);
+    if (SEL === j) SEL = -1; relaxDirty = true; computePlane(); sfx('jump'); haptic('right', .3, 40);
   } else if (m === 'int') {
     let i = -1; for (let k = N - 1; k >= 0; k--) if (KIND[k] === 1 || KIND[k] === 4) { i = k; break; }
     if (i < 0) return;
@@ -1371,7 +1499,7 @@ function vrInput(dt) {
   if (edge('right', 'a')) actionA();
   if (edge('right', 'b')) { buildModel(); sfx('click'); }
   if (edge('left', 'a')) { st.compact = !st.compact; menuDirty = posDirty = true; }
-  if (edge('left', 'b')) { st.guides = !st.guides; menuDirty = true; }
+  if (edge('left', 'b')) cyclePlane();
   // stick derecho: solo τ (o ángulo / escala), nunca gira la red; stick izquierdo: girar la red
   const ry = -dz(R.sy || 0); let lx = dz(Lf.sx || 0), ly = dz(Lf.sy || 0);
   if (Math.abs(lx) > Math.abs(ly)) ly = 0; else lx = 0; // un eje por vez
@@ -1412,7 +1540,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Tab') { e.preventDefault(); const i = MODES.findIndex(m => m.id === st.mode); setMode(MODES[(i + (e.shiftKey ? MODES.length - 1 : 1)) % MODES.length].id); return; }
   if (e.repeat) return;
   const lat = { '1': 'sc', '2': 'bcc', '3': 'fcc', '4': 'hcp' }[k]; if (lat) { setLattice(lat); return; }
-  const map = { ' ': 'action', b: 'reset', backspace: 'reset', t: 'size', g: 'guides', i: 'sites', o: 'stype', p: 'partials', c: 'cyclic', f: 'frenkel', m: 'sound', h: 'center', j: 'rot', e: 'bonds', z: 'resetall', escape: 'exit' };
+  const map = { ' ': 'action', b: 'reset', backspace: 'reset', t: 'size', g: 'plane', i: 'sites', o: 'stype', p: 'partials', c: 'cyclic', f: 'frenkel', m: 'sound', h: 'center', j: 'rot', e: 'bonds', z: 'resetall', escape: 'exit' };
   if (map[k]) { if (k === ' ') e.preventDefault(); doMenu(map[k]); sfx('click'); }
   if (k === '0') { st.sliderTau = 0; sliderDirty = true; }
 });
@@ -1458,6 +1586,7 @@ function drawHUD() {
     l2 = st.mode === 'perfect' ? `NC = ${L.NC} · FEA = ${L.FEA} · átomos/celda = ${L.apc} · ${L.rel}` + (SEL >= 0 ? ` · vecinos del átomo: ${NEIGH.length}` : '')
       : `vacancias: ${v} · intersticiales: ${it} · solutos: ${so}`;
   }
+  if (PLANE && MD.kind === 'block') l2 = PLANE.info;
   const l1 = `${L.corto} · ${modeName(st.mode)}`, lr = `${Math.round(fps)} fps · ×${(3e8 * userScale).toExponential(0).replace('e+', '·10^')}`;
   const key = l1 + l2 + lr + renderer.xr.isPresenting;
   if (key === hudKey) return; hudKey = key;
@@ -1468,8 +1597,8 @@ function drawHUD() {
   g.textAlign = 'left'; g.fillStyle = '#eef3ff';
   fitText(g, l2, 28, 112, 968, 30);
   g.fillStyle = '#9fb0cf';
-  fitText(g, renderer.xr.isPresenting ? 'Gatillo: menú/átomos · Agarre: mover (2 manos: escalar) · Stick der.: τ · Stick izq.: girar · A: acción · B: reiniciar'
-    : 'Clic: menú / átomos · Clic der.: agarrar · Rueda: escala · ↑↓: τ · Q/E R/F: girar · Espacio: acción · B: reiniciar · Tab: defecto · 1-4: red', 28, 166, 968, 24);
+  fitText(g, renderer.xr.isPresenting ? 'Gatillo: menú/átomos · Agarre: mover (2 manos: escalar) · Stick der.: τ · Stick izq.: girar · A: acción · B: reiniciar · Y: planos'
+    : 'Clic: menú / átomos · Clic der.: agarrar · Rueda: escala · ↑↓: τ · Q/E R/F: girar · Espacio: acción · B: reiniciar · Tab: defecto · 1-4: red · G: planos', 28, 166, 968, 24);
   hudTex.needsUpdate = true;
 }
 
@@ -1519,7 +1648,7 @@ function loop(time) {
 
 buildModel(); updateMatrices(1); drawMenu(); drawSlider();
 renderer.setAnimationLoop(loop);
-window.__app = { act() { crystalAction(head.pos, head.fwd, 'right'); }, actionA, frenkel, counts() { let v = 0, it = 0, so = 0; for (let i = 0; i < N; i++) { if (HID[i]) v++; if (KIND[i] === 1 || KIND[i] === 4) it++; if (KIND[i] === 2 || KIND[i] === 3) so++; } return { N, v, it, so, sel: SEL, neigh: NEIGH.length }; }, menuCv, hudCv, sliderCv, view(y, p) { yaw = y; pitch = p; }, st, get N() { return N; }, setLattice, setMode, doMenu, crystal, camera, get MD() { return MD; } };
+window.__app = { info() { return PLANE ? PLANE.info + ' | cls:' + Array.from(PLN.slice(0, N)).reduce((o, v) => (o[v] = (o[v] || 0) + 1, o), {}) : null; }, act() { crystalAction(head.pos, head.fwd, 'right'); }, actionA, frenkel, counts() { let v = 0, it = 0, so = 0; for (let i = 0; i < N; i++) { if (HID[i]) v++; if (KIND[i] === 1 || KIND[i] === 4) it++; if (KIND[i] === 2 || KIND[i] === 3) so++; } return { N, v, it, so, sel: SEL, neigh: NEIGH.length }; }, menuCv, hudCv, sliderCv, view(y, p) { yaw = y; pitch = p; }, st, get N() { return N; }, setLattice, setMode, doMenu, crystal, camera, get MD() { return MD; } };
 
 </script>
 </body>
