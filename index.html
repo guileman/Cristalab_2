@@ -462,10 +462,12 @@ const SUN_DIR = sun.position.clone().normalize();
     g.fillStyle = gr; g.fillRect(0, 0, 256, 128);
   }
   const t = canvasTex(c);
+  // planos fijos en el mundo (no sprites): así no giran con el alabeo de las gafas
+  const cloudGeo = new THREE.PlaneGeometry(90, 45), cloudMat = new THREE.MeshBasicMaterial({ map: t, fog: false, depthWrite: false, transparent: true, opacity: .85, side: THREE.DoubleSide });
   for (let i = 0; i < 9; i++) {
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, fog: false, depthWrite: false, transparent: true, opacity: .85 }));
-    const a = Math.random() * Math.PI * 2, r = 160 + Math.random() * 120;
-    sp.position.set(Math.cos(a) * r, 60 + Math.random() * 40, Math.sin(a) * r); sp.scale.set(90, 45, 1); scene.add(sp);
+    const cl = new THREE.Mesh(cloudGeo, cloudMat);
+    const a = Math.random() * Math.PI * 2, r = 160 + Math.random() * 120, h = 60 + Math.random() * 40;
+    cl.position.set(Math.cos(a) * r, h, Math.sin(a) * r); cl.lookAt(0, h * .6, 0); cl.scale.set(1 + Math.random() * .5, 1, 1); scene.add(cl);
   }
 }
 
@@ -545,23 +547,27 @@ function useSprite(tex, lx, ly, lz, size, aspect) {
   o.local.set(lx, ly, lz); o.size = size; o.aspect = aspect; o.s.visible = true;
 }
 
-// ===================== HUD COLIMADO =====================
-const hudCv = mkCanvas(1024, 160), hudG = hudCv.getContext('2d'), hudTex = canvasTex(hudCv);
-const hud = new THREE.Mesh(new THREE.PlaneGeometry(22, 3.44), new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false, depthWrite: false, fog: false }));
-hud.position.set(0, -9.6, -30); hud.renderOrder = 999; hud.frustumCulled = false; camera.add(hud);
 
 // ===================== MENÚ FIJO AL MUNDO =====================
 const MW = 1024, MH = 1400;
 const menuCv = mkCanvas(MW, MH), menuG = menuCv.getContext('2d'), menuTex = canvasTex(menuCv);
 const menu = new THREE.Mesh(new THREE.PlaneGeometry(.72, .72 * MH / MW), new THREE.MeshBasicMaterial({ map: menuTex, fog: false, transparent: true }));
-menu.position.set(-0.98, 1.38, -0.72); menu.lookAt(0, 1.55, 0); scene.add(menu);
+menu.position.set(-0.98, 1.29, -0.72); menu.lookAt(0, 1.55, 0); scene.add(menu);
 { // marco y patas del atril
   const fr = new THREE.Mesh(new THREE.BoxGeometry(.76, .76 * MH / MW + .04, .02), new THREE.MeshLambertMaterial({ color: 0x2a3140, flatShading: true }));
   fr.position.set(0, 0, -.012); menu.add(fr);
   const leg = new THREE.Mesh(new THREE.CylinderGeometry(.02, .03, 0.9, 6), new THREE.MeshLambertMaterial({ color: 0x4a5160, flatShading: true }));
-  leg.position.set(0, -.95, -.05); menu.add(leg);
+  leg.position.set(0, -.86, -.05); menu.add(leg);
 }
-const SW = 512, SH = 120;
+// panel de estado (red, defecto, τ, etc.): parte del menú fijo, encima del título
+const hudCv = mkCanvas(1024, 200), hudG = hudCv.getContext('2d'), hudTex = canvasTex(hudCv);
+const hud = new THREE.Mesh(new THREE.PlaneGeometry(.72, .72 * 200 / 1024), new THREE.MeshBasicMaterial({ map: hudTex, fog: false, transparent: true }));
+hud.position.set(0, .72 * MH / MW / 2 + .085, 0); menu.add(hud);
+{
+  const fr = new THREE.Mesh(new THREE.BoxGeometry(.76, .72 * 200 / 1024 + .03, .02), new THREE.MeshLambertMaterial({ color: 0x2a3140, flatShading: true }));
+  fr.position.z = -.012; hud.add(fr);
+}
+const SW = 512, SH = 150;
 const sliderCv = mkCanvas(SW, SH), sliderG = sliderCv.getContext('2d'), sliderTex = canvasTex(sliderCv);
 const slider = new THREE.Mesh(new THREE.PlaneGeometry(.62, .62 * SH / SW), new THREE.MeshBasicMaterial({ map: sliderTex, fog: false, transparent: true }));
 slider.position.set(0.86, 1.12, -0.82); slider.lookAt(0, 1.4, 0); scene.add(slider);
@@ -585,7 +591,7 @@ const TXT = {
     vac: 'Vacancia: sitio de red vacío (marcado en rojo). Su concentración de equilibrio crece con T: Nv = N·exp(−Qv/kT). Los vecinos se relajan hacia el hueco. Gatillo sobre un átomo: lo sacás (o lo devolvés si apuntás al hueco). A: un vecino salta al hueco → así difunden los átomos sustitucionales. Par de Frenkel: un átomo se va a un intersticio y deja su vacancia.',
     int: 'Intersticial: átomo chico (C, N, H, B) alojado en un hueco de la red. Gatillo: agregar en el sitio apuntado o quitar. A: salto a un sitio vecino (difusión intersticial, mucho más rápida que la sustitucional). El C entra en el hueco octaédrico; el del Fe-γ (FCC) es más grande que el del Fe-α (BCC): por eso la austenita disuelve hasta 2,11 % C y la ferrita solo 0,022 %. Fijate la distorsión tetragonal en BCC.',
     sub: 'Sustitucional: el soluto reemplaza a un átomo del solvente (Zn en Cu = latón, Ni en Cu). Reglas de Hume-Rothery para solubilidad amplia: ΔR < 15 %, misma estructura, electronegatividad y valencia parecidas. Gatillo sobre un átomo: soluto grande (azul, comprime alrededor) → chico (verde, tracciona) → solvente. Estos campos de tensión traban dislocaciones: endurecimiento por solución sólida.',
-    edge: 'Dislocación de borde (⊥): un semiplano extra de átomos termina en la línea de dislocación. b ⟂ a la línea. Aplicá esfuerzo de corte τ (stick derecho, ↑↓ o la barra): por debajo de τc solo hay deformación elástica; por encima la dislocación se desliza fila por fila sobre el plano de deslizamiento (celeste) rompiendo solo los enlaces del núcleo. Al salir deja un escalón de tamaño b: eso es deformación plástica. En FCC podés disociarla en dos parciales de Shockley con una falla de apilamiento (violeta) en el medio.',
+    edge: 'Dislocación de borde (⊥): un semiplano extra de átomos (turquesa) termina en la línea de dislocación. b ⟂ a la línea. Aplicá esfuerzo de corte τ (stick derecho, ↑↓ o la barra): por debajo de τc solo hay deformación elástica; por encima la dislocación se desliza fila por fila sobre el plano de deslizamiento (celeste) rompiendo solo los enlaces del núcleo. Al salir deja un escalón de tamaño b: eso es deformación plástica. En FCC podés disociarla en dos parciales de Shockley con una falla de apilamiento (violeta) en el medio.',
     screw: 'Dislocación de tornillo (↺): b ∥ a la línea. Los planos atómicos forman una rampa helicoidal alrededor del núcleo. Bajo τ se mueve perpendicular a b; como b y la línea son paralelos puede cambiar de plano (deslizamiento cruzado). Girá la red (stick izquierdo o "Girar 90°") para ver la hélice. Mitad inferior más oscura para seguir el corrimiento.',
     twin: 'Macla: región cuya red es la imagen especular de la original respecto del plano de macla (verde). Se forma por un corte homogéneo plano a plano. Aplicá τ por encima de τ macla y mirá avanzar el borde de macla capa por capa; con τ negativa se "desmacla". Común en HCP (Mg, Zn, Ti) y en BCC a baja T o alta velocidad; en FCC (latón, Cu) aparecen maclas de recocido. En HCP fijate los reacomodos (shuffles) atómicos.',
     gb: 'Límite de grano: interfase entre dos cristales con distinta orientación (inclinación θ alrededor del eje que ves de frente). Bajo ángulo (θ < 15°): es una pared de dislocaciones de borde separadas D ≈ b/θ. Alto ángulo: región desordenada de mayor energía, camino rápido de difusión y obstáculo al deslizamiento (Hall-Petch: σy = σ0 + k·d^-½). Cambiá θ con el stick derecho, ↑↓ o la barra; A: ángulos típicos.'
@@ -652,16 +658,17 @@ function drawMenu() {
 }
 
 function sliderSpec() {
-  if (st.mode === 'gb') return { lbl: 'Ángulo de inclinación θ', min: 0, max: 45, val: st.gbAngle, fmt: v => v.toFixed(1) + '°', marks: [[15, 'bajo / alto ángulo']] };
+  if (st.mode === 'gb') return { lbl: 'Ángulo de inclinación θ', sub: 'límite de grano', min: 0, max: 45, val: st.gbAngle, fmt: v => v.toFixed(1) + '°', marks: [[15, 'bajo / alto ángulo']] };
   const tc = st.mode === 'twin' ? L.tauT : L.tauC;
-  return { lbl: 'Esfuerzo de corte τ (barra = carga sostenida)', min: -1, max: 1, val: st.tau, fmt: v => (v >= 0 ? '+' : '') + v.toFixed(2) + ' τmáx', marks: [[tc, 'τc'], [-tc, '−τc']], sliderVal: st.sliderTau };
+  return { lbl: 'Esfuerzo de corte τ', sub: 'barra = carga sostenida', min: -1, max: 1, val: st.tau, fmt: v => (v >= 0 ? '+' : '') + v.toFixed(2) + ' τmáx', marks: [[tc, 'τc'], [-tc, '−τc']], sliderVal: st.sliderTau };
 }
 function drawSlider() {
   const g = sliderG, sp = sliderSpec(), active = ['edge', 'screw', 'twin', 'gb'].includes(st.mode);
   g.clearRect(0, 0, SW, SH); rr(g, 0, 0, SW, SH, 18); g.fillStyle = 'rgba(16,21,34,.94)'; g.fill();
   g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.font = 'bold 19px system-ui, sans-serif'; g.fillStyle = active ? '#ffd34d' : '#5e6779';
   g.fillText(active ? sp.lbl : 'Esfuerzo de corte (elegí dislocación o macla)', 18, 30);
-  const x0 = 24, x1 = SW - 24, y0 = 58, h = 26, X = v => x0 + (v - sp.min) / (sp.max - sp.min) * (x1 - x0);
+  if (active && sp.sub) { g.font = '15px system-ui, sans-serif'; g.fillStyle = '#8fa0c0'; g.fillText(sp.sub, 18, 52); }
+  const x0 = 24, x1 = SW - 24, y0 = 72, h = 26, X = v => x0 + (v - sp.min) / (sp.max - sp.min) * (x1 - x0);
   rr(g, x0, y0, x1 - x0, h, 10); g.fillStyle = '#2e3850'; g.fill();
   if (active) {
     for (const [v] of sp.marks) { g.fillStyle = '#ff6a3d'; g.fillRect(X(v) - 2, y0 - 6, 4, h + 12); }
@@ -670,7 +677,7 @@ function drawSlider() {
     g.fillRect(Math.min(zero, xv), y0 + 4, Math.abs(xv - zero), h - 8);
     if (sp.sliderVal !== undefined) { g.fillStyle = '#ffffff'; g.beginPath(); g.arc(X(sp.sliderVal), y0 + h / 2, 11, 0, 7); g.fill(); }
     else { g.fillStyle = '#ffffff'; g.beginPath(); g.arc(xv, y0 + h / 2, 11, 0, 7); g.fill(); }
-    g.font = 'bold 20px system-ui, sans-serif'; g.fillStyle = '#eef3ff'; g.textAlign = 'right'; g.fillText(sp.fmt(sp.val), x1, 30);
+    g.font = 'bold 26px system-ui, sans-serif'; g.fillStyle = '#eef3ff'; g.textAlign = 'right'; g.fillText(sp.fmt(sp.val), x1, 46);
     g.font = '15px system-ui, sans-serif'; g.fillStyle = '#ff9f80'; g.textAlign = 'center';
     for (const [v, t] of sp.marks) g.fillText(t, X(v), y0 + h + 22);
   }
@@ -831,7 +838,26 @@ function simDisl(dt) {
     if (D.screw) { tmpU[2] += slip + el * y; } else { tmpU[0] += slip + el * y; }
     TGT[i * 3] = x + tmpU[0]; TGT[i * 3 + 1] = y + tmpU[1]; TGT[i * 3 + 2] = z + tmpU[2];
   }
+  markHalfPlane(D);
   posDirty = colDirty = true;
+}
+
+// semiplano extra de la dislocación de borde: columnas (de ancho b) que terminan en el núcleo
+function markHalfPlane(D) {
+  GRP.fill(0, 0, N);
+  if (D.screw || !D.active || !D.nc) return;
+  let xc = 0, best = 1e9, side = 1;
+  for (let i = 0; i < N; i++) {
+    if (Math.abs(REF[i * 3 + 1] - D.d / 2) > 1e-4) continue;
+    const dd = TGT[i * 3] - D.xd;
+    if (Math.abs(dd) < best) { best = Math.abs(dd); xc = REF[i * 3]; side = dd > 0 ? -1 : 1; }
+  }
+  const span = (Math.round(D.b / D.hop) - 1) * D.hop;
+  for (let i = 0; i < N; i++) {
+    if (REF[i * 3 + 1] <= 0) continue;
+    const dx = (REF[i * 3] - xc) * side;
+    if (dx > -1e-3 && dx < span + 1e-3) GRP[i] = 1;
+  }
 }
 
 function simTwin(dt) {
@@ -861,7 +887,7 @@ function simGB(dt) {
 }
 
 // ===================== COLORES Y MATRICES =====================
-const YEL = new THREE.Color(0xffd34d), MAG = new THREE.Color(0xd65ae0), GRN = new THREE.Color(0x58e0a0), BLU = new THREE.Color(0x6aa8ff), RED = new THREE.Color(0xff5a5a), NEI = new THREE.Color(0xffe066);
+const HALF = new THREE.Color(0x1fe0c0), YEL = new THREE.Color(0xffd34d), MAG = new THREE.Color(0xd65ae0), GRN = new THREE.Color(0x58e0a0), BLU = new THREE.Color(0x6aa8ff), RED = new THREE.Color(0xff5a5a), NEI = new THREE.Color(0xffe066);
 const kc = {}; for (const k in KCOL) kc[k] = new THREE.Color(KCOL[k]);
 function updateColors() {
   const a = atoms.instanceColor.array, m = st.mode, nn = L.nn;
@@ -875,6 +901,7 @@ function updateColors() {
       if (y < 0) tmpC.multiplyScalar(.74);
       const cx = CUR[i * 3], cy = CUR[i * 3 + 1];
       for (let k = 0; k < D.nc; k++) { const c = D.cores[k]; if (c.w > .3 && Math.hypot(cx - c.xc, cy) < 1.05 * nn) tmpC.lerp(YEL, .75); }
+      if (GRP[i]) tmpC.lerp(HALF, .85);
       if (D.nc === 2 && Math.abs(y) < D.d && REF[i * 3] > D.cores[1].xc && REF[i * 3] < D.cores[0].xc) tmpC.lerp(MAG, .7);
     }
     if (MD.kind === 'twin' && y > 1e-4 && y <= (MD.yd || 0) + 1e-3) tmpC.lerp(GRN, .5);
@@ -972,6 +999,7 @@ function placeSprites() { // tamaño angular constante
   for (let i = 0; i < spriteN; i++) {
     const o = sprites[i]; _w.copy(o.local); crystal.localToWorld(_w); o.s.position.copy(_w);
     const d = _w.distanceTo(head.pos), h = d * o.size; o.s.scale.set(h * o.aspect, h, 1);
+    o.s.material.rotation = head.alabeo;
   }
 }
 
@@ -1343,16 +1371,12 @@ function desktopHover() {
   if (drag && drag.hand === 'mouse' && hit && hit.object === slider) sliderSet(hit.uv);
 }
 
-// ===================== HUD =====================
+// ===================== PANEL DE ESTADO (en el menú) =====================
 function fitText(g, t, x, y, maxW, px) { let f = px; do { g.font = f + 'px system-ui, sans-serif'; f--; } while (g.measureText(t).width > maxW && f > 12); g.fillText(t, x, y); }
 let fps = 72, fpsAcc = 0, fpsN = 0;
+let hudKey = '';
 function drawHUD() {
-  const g = hudG; g.clearRect(0, 0, 1024, 160);
-  rr(g, 4, 4, 1016, 152, 22); g.fillStyle = 'rgba(12,16,28,.62)'; g.fill();
-  g.textAlign = 'left'; g.textBaseline = 'alphabetic';
-  g.fillStyle = '#ffd34d'; g.font = 'bold 34px system-ui, sans-serif'; g.fillText(`${L.corto} · ${modeName(st.mode)}`, 24, 46);
-  g.textAlign = 'right'; g.fillStyle = '#8fa0c0'; g.font = '22px system-ui, sans-serif'; g.fillText(`${fps.toFixed(0)} fps · ×${(3e8 * userScale).toExponential(0).replace('e+', '·10^')}`, 1000, 44);
-  g.textAlign = 'left'; g.font = '27px system-ui, sans-serif'; g.fillStyle = '#eef3ff';
+  const g = hudG;
   let l2 = '';
   const t = st.tau, ts = (t >= 0 ? '+' : '') + t.toFixed(2);
   if (MD.kind === 'disl') l2 = `τ = ${ts} · τc = ${L.tauC.toFixed(2)} · ${Math.abs(t) > L.tauC ? 'deslizando ▸' : 'solo deformación elástica'} · escalón ${MD.S}·b · sistema ${L.sistema}`;
@@ -1363,10 +1387,18 @@ function drawHUD() {
     l2 = st.mode === 'perfect' ? `NC = ${L.NC} · FEA = ${L.FEA} · átomos/celda = ${L.apc} · ${L.rel}` + (SEL >= 0 ? ` · vecinos del átomo: ${NEIGH.length}` : '')
       : `vacancias: ${v} · intersticiales: ${it} · solutos: ${so}`;
   }
-  fitText(g, l2, 24, 92, 976, 27);
+  const l1 = `${L.corto} · ${modeName(st.mode)}`, lr = `${Math.round(fps)} fps · ×${(3e8 * userScale).toExponential(0).replace('e+', '·10^')}`;
+  const key = l1 + l2 + lr + renderer.xr.isPresenting;
+  if (key === hudKey) return; hudKey = key;
+  g.clearRect(0, 0, 1024, 200); rr(g, 0, 0, 1024, 200, 26); g.fillStyle = 'rgba(16,21,34,.94)'; g.fill();
+  g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+  g.fillStyle = '#ffd34d'; g.font = 'bold 40px system-ui, sans-serif'; g.fillText(l1, 28, 56);
+  g.textAlign = 'right'; g.fillStyle = '#8fa0c0'; g.font = '24px system-ui, sans-serif'; g.fillText(lr, 996, 54);
+  g.textAlign = 'left'; g.fillStyle = '#eef3ff';
+  fitText(g, l2, 28, 112, 968, 30);
   g.fillStyle = '#9fb0cf';
   fitText(g, renderer.xr.isPresenting ? 'Gatillo: menú/átomos · Agarre: mover (2 manos: escalar) · Stick der.: τ · Stick izq.: girar · A: acción · B: reiniciar'
-    : 'Clic: menú / átomos · Clic der.: agarrar · Rueda: escala · ↑↓: τ · Q/E R/F: girar · Espacio: acción · B: reiniciar · Tab: defecto · 1-4: red', 24, 134, 976, 22);
+    : 'Clic: menú / átomos · Clic der.: agarrar · Rueda: escala · ↑↓: τ · Q/E R/F: girar · Espacio: acción · B: reiniciar · Tab: defecto · 1-4: red', 28, 166, 968, 24);
   hudTex.needsUpdate = true;
 }
 
@@ -1374,7 +1406,7 @@ function drawHUD() {
 let last = performance.now(), frame = 0;
 function loop(time) {
   const now = performance.now(); const dt = Math.min((now - last) / 1000, .05); last = now; frame++;
-  fpsAcc += dt; fpsN++; if (fpsAcc > .5) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
+  fpsAcc += dt; fpsN++; if (fpsAcc > .5) { fps = Math.round(fpsN / fpsAcc / 2) * 2; fpsAcc = 0; fpsN = 0; }
   st.time += dt;
   const xr = renderer.xr.isPresenting;
   if (xr) renderer.xr.updateCamera(camera);
@@ -1402,7 +1434,7 @@ function loop(time) {
 
   if (menuDirty) drawMenu();
   if (sliderDirty && frame % 3 === 0) drawSlider();
-  if (frame % 2 === 0) drawHUD();
+  if (frame % 4 === 0) drawHUD();
 
   if (audio.ready) {
     const speed = MD.kind === 'disl' ? (MD.active && Math.abs(tau) > L.tauC ? 1 : 0) : MD.kind === 'twin' ? (Math.abs(tau) > L.tauT ? 1 : 0) : 0;
